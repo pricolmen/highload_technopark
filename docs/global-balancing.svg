@@ -109,7 +109,7 @@
       <text x="235" y="34" fill="#7fb0ff" font-size="20" font-weight="700">34%</text>
       <text x="27" y="61" fill="#a9bdd5" font-size="13">Москва, Санкт-Петербург, СЗФО</text>
       <line x1="27" y1="76" x2="269" y2="76" stroke="#2d4059"/>
-      <text x="27" y="101" fill="#d8e7f8" font-size="13">штатный пик ≈ 2 487 RPS</text>
+      <text x="27" y="101" fill="#d8e7f8" font-size="13">пиковый час ≈ 2 390 RPS</text>
     </g>
 
     <g transform="translate(452 439)" filter="url(#shadow)">
@@ -119,7 +119,7 @@
       <text x="235" y="34" fill="#ffc766" font-size="20" font-weight="700">33%</text>
       <text x="27" y="61" fill="#a9bdd5" font-size="13">ЦФО без Москвы, ЮФО, СКФО</text>
       <line x1="27" y1="76" x2="269" y2="76" stroke="#2d4059"/>
-      <text x="27" y="101" fill="#d8e7f8" font-size="13">штатный пик ≈ 2 414 RPS</text>
+      <text x="27" y="101" fill="#d8e7f8" font-size="13">пиковый час ≈ 2 320 RPS</text>
     </g>
 
     <g transform="translate(792 439)" filter="url(#shadow)">
@@ -129,7 +129,7 @@
       <text x="235" y="34" fill="#71df98" font-size="20" font-weight="700">33%</text>
       <text x="27" y="61" fill="#a9bdd5" font-size="13">ПФО, УФО, СФО и ДФО</text>
       <line x1="27" y1="76" x2="269" y2="76" stroke="#2d4059"/>
-      <text x="27" y="101" fill="#d8e7f8" font-size="13">штатный пик ≈ 2 414 RPS</text>
+      <text x="27" y="101" fill="#d8e7f8" font-size="13">пиковый час ≈ 2 320 RPS</text>
     </g>
 
     <!-- Footer legend -->
@@ -142,8 +142,8 @@
       <circle cx="405" cy="25" r="7" fill="#4b91ff"/>
       <text x="420" y="30" fill="#c6d7ea" font-size="12">origin-ДЦ: unicast</text>
       <text x="24" y="54" fill="#8098b5" font-size="12">Anycast применяется только для публичного DNS и CDN/WAF.</text>
-      <text x="832" y="30" fill="#8fdcf0" font-size="13" font-weight="700">Каждый ДЦ рассчитан на 4 000 RPS</text>
-      <text x="832" y="53" fill="#8098b5" font-size="12">при отказе: ≈ 3 658 RPS на площадку</text>
+      <text x="832" y="30" fill="#8fdcf0" font-size="13" font-weight="700">Целевая мощность ДЦ: 5 100 RPS</text>
+      <text x="832" y="53" fill="#8098b5" font-size="12">при отказе: 3 514 RPS на площадку</text>
     </g>
   </g>
 </svg>
