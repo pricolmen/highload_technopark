@@ -26,13 +26,15 @@ const tables = [
   ['profiles', 60_000_000, 99000, api.resumeWrite, api.register],
   ['companies', 2_670_000, 50000, vacancyReads + api.vacancyWrite + events, api.register * 0.05],
   ['company_members', 2_670_000, 256, api.vacancyWrite + api.employerList + api.resumeRead + api.status, api.register * 0.05],
-  ['sessions', 66_000_000, 512, api.auth, 2 * api.auth],
+  // One session lookup + TTL touch per external API request is an upper bound.
+  // Creation/deletion allowance and upper expiry rate are budgeted separately.
+  ['sessions', 66_000_000, 512, peak, peak + 2 * api.auth],
   ['resumes', 79_600_000, 100000, api.resumeWrite + api.apply + api.resumeRead, api.resumeWrite],
   ['vacancies', 48_129_817, 50000, vacancyReads + api.vacancyWrite + api.apply + expiry + events, events],
   ['applications', 1_131_680_675, applicationBytes, api.apply + api.applicantList + api.employerList + api.resumeRead + api.status, api.apply + api.status],
   ['reference_values', 10000, 256, 1, 1],
   ['idempotency_keys', writes * day, 1024, writes, 3 * writes],
-  ['outbox_events', events * day, 1024, events, 3 * events],
+  ['outbox_events', events * day, 1024, events, 4 * events],
   ['event_queue', events * day, 1024, events, 3 * events],
   ['consumer_receipts', events * day, 64, events, 2 * events],
   ['vacancy_search', 778367, 40000, searchReads, events],
@@ -72,7 +74,7 @@ names.forEach((name, index) => {
   const cells = line.split('|').slice(1, -1).map(cell => cell.trim());
   assert.equal(Number(cells.at(-1).replace(/\s/g, '')), Object.values(api)[index], `input RPS: ${name}`);
 });
-const section = readme.split('## 5. Логическая схема БД')[1]?.split('## Список источников')[0];
+const section = readme.split('## 5. Логическая схема БД')[1]?.split(/## 6\. Физическая схема БД|## Список источников/)[0];
 assert(section, 'section 5 exists');
 const diagrams = [...section.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g)].map(match => match[1]);
 assert.equal(diagrams.length, 3, 'three native Mermaid ER diagrams');
@@ -98,6 +100,8 @@ for (const diagram of diagrams) {
 assert(/text\s+cover_letter/.test(er), 'cover letter in application ER entity');
 assert(!/!\[.*\]\(docs\/logical-db\.(svg|png)\)/.test(section), 'old image not embedded');
 assert(!/`(?:vacancy_cache|search_cache)`/.test(section), 'removed application caches');
+assert(/string\s+csrf_token/.test(er), 'server-side CSRF state');
+assert(!/refresh_digest|access-токен|JWT/.test(section), 'cookie session model, no bearer-token lifecycle');
 assert(section.includes('10 минут'), 'publication search visibility budget');
 assert(section.includes(format(totalBytes / 1e12, 3)), 'total logical volume');
 assert.equal(tables.find(t => t[0] === 'users')[2] + tables.find(t => t[0] === 'profiles')[2], 100000);
