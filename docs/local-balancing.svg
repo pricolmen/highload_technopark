@@ -42,7 +42,7 @@
 
     <g transform="translate(930 128)" data-panel="true">
       <rect width="606" height="76" rx="18" fill="#142b49" stroke="#365575"/>
-      <text x="303" y="38" fill="#f1f6ff" font-size="20" font-weight="700" text-anchor="middle" dominant-baseline="middle">На один ДЦ: 4 600 RPS · 2,36 Гбит/с</text>
+      <text x="303" y="38" fill="#f1f6ff" font-size="20" font-weight="700" text-anchor="middle" dominant-baseline="middle">На один ДЦ: 4 600 RPS · 2,37 Гбит/с</text>
     </g>
 
     <rect x="40" y="244" width="1520" height="964" rx="24" fill="#0a182b" fill-opacity=".65" stroke="#45617f" stroke-width="1.5" stroke-dasharray="9 8"/>
