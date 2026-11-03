@@ -34,7 +34,7 @@ const tables = [
   ['applications', 1_131_680_675, applicationBytes, api.apply + api.applicantList + api.employerList + api.resumeRead + api.status, api.apply + api.status],
   ['reference_values', 10000, 256, 1, 1],
   ['idempotency_keys', writes * day, 1024, writes, 3 * writes],
-  ['outbox_events', events * day, 1024, events, 4 * events],
+  ['outbox_events', events * day, 1024, events, 5 * events],
   ['event_queue', events * day, 1024, events, 3 * events],
   ['consumer_receipts', events * day, 64, events, 2 * events],
   ['vacancy_search', 778367, 40000, searchReads, events],

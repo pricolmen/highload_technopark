@@ -42,6 +42,8 @@ const esOneCopyGB = bytes('vacancy_search') * 2 / 1e9;
 const kafkaOneCopyGB = sum(['event_queue', 'request_log_buffer']) * 1.5 / 1e9;
 const clickhouseOneCopyGB = bytes('request_logs') * 1.3 * 8 / 7 / 1e9;
 const backupTB = (pgPhysicalTB * 3 + 21 * 0.4 + 5) * 1.25;
+const employer = { groups: 4, page: 20, briefBytes: 2000, rps: 95 };
+const delivery = { input: rows.get('outbox_events').read, capacity: 50, windowSeconds: 600 };
 const report = {
   pg: groups.map(g => ({ group: g.name, clusters: g.groups,
     logicalTB: g.bytes / 1e12, physicalTBPerNode: g.bytes * 1.3 / g.groups / 1e12,
@@ -69,13 +71,27 @@ const report = {
   clickhouse: { oneCopyGB: clickhouseOneCopyGB, threeCopiesGB: clickhouseOneCopyGB * 3 },
   backup: { requiredTB: backupTB, allocatedTB: 160 },
   applicationReadSQL: rows.get('applications').read + 95 * (4 - 1),
+  employerFanOut: {
+    maxRows: employer.groups * employer.page,
+    maxBytesPerRequest: employer.groups * employer.page * employer.briefBytes,
+    maxBytesPerSecond: employer.rps * employer.groups * employer.page * employer.briefBytes,
+    extraBytesPerSecond: employer.rps * (employer.groups - 1) * employer.page * employer.briefBytes,
+    extraSQL: employer.rps * (employer.groups - 1),
+  },
+  searchDelivery: {
+    normalOutboxWrites: rows.get('outbox_events').write,
+    backlog: delivery.input * delivery.windowSeconds,
+    drainSeconds: Math.ceil(delivery.input * delivery.windowSeconds / (delivery.capacity - delivery.input)),
+    oneIndexerDrainSeconds: Math.ceil(delivery.input * delivery.windowSeconds / (delivery.capacity / 2 - delivery.input)),
+    catalogueCatchupWriteCeiling: delivery.capacity * (5 + 2) + 5 + 2 * 3,
+  },
 };
 if (process.argv.includes('--report')) {
   console.log(JSON.stringify(report, null, 2));
   process.exit(0);
 }
 
-const physical = readme.split('## 6. Физическая схема БД')[1]?.split('## Список источников')[0];
+const physical = readme.split('## 6. Физическая схема БД')[1]?.split(/## 7\. Алгоритмы|## Список источников/)[0];
 assert(physical, 'physical section exists');
 const diagrams = [...physical.matchAll(/```mermaid\s*\n([\s\S]*?)\n```/g)].map(m => m[1]);
 assert.equal(diagrams.length, 4, 'overview and three physical ER diagrams');
@@ -101,6 +117,19 @@ assert.equal(report.media.objects, 26672000);
 assert.equal(report.media.imagePeak, 3627);
 assert.equal(report.media.totalEdgeQPS, 5516);
 assert.equal(report.applicationReadSQL, 820);
+assert.equal(report.employerFanOut.extraSQL, 285);
+assert.equal(report.employerFanOut.maxRows, 80);
+assert.equal(report.employerFanOut.maxBytesPerSecond, 15_200_000);
+assert.equal(report.searchDelivery.normalOutboxWrites, 25);
+assert.equal(report.searchDelivery.backlog, 3000);
+assert.equal(report.searchDelivery.drainSeconds, 67);
+assert.equal(report.searchDelivery.oneIndexerDrainSeconds, 150);
+assert(report.searchDelivery.catalogueCatchupWriteCeiling < 500);
+assert(physical.includes('15,2 Мбайт/с') && physical.includes('361 < 500'));
+const algorithms = readme.split('## 7. Алгоритмы')[1]?.split('## Список источников')[0];
+assert(algorithms, 'algorithm section exists');
+assert.equal([...algorithms.matchAll(/^### 7\.\d+\./gm)].length, 3);
+assert(algorithms.includes('3 000 / 45') && algorithms.includes('95 × 4 = 380'));
 for (const g of report.pg) {
   assert(g.diskUsedPct < 70, `70% disk threshold: ${g.group}`);
   const line = physical.split('\n').find(l => l.startsWith(`| ${g.group} |`));
@@ -134,6 +163,7 @@ console.log(JSON.stringify({ status: 'PASS', diagrams: diagrams.length, mappedLo
   physicalAuxiliarySets: 1, pgInstances: report.pgInstances, pgPhysicalTB,
   backupRequiredTB: backupTB,
   verified: ['per-table stores/indexes/HA', 'ER fields', 'shard capacity', 'replica count',
-    'media and metadata', 'employer query fan-out', 'pool budgets', 'backup quota', 'source anchors'],
+    'media and metadata', 'employer query fan-out', 'outbox claim cost', 'backlog recovery',
+    'pool budgets', 'backup quota', 'source anchors'],
   limitation: 'No production-scale databases were deployed or benchmarked.',
 }, null, 2));
