@@ -173,7 +173,7 @@ RPS в наиболее загруженный час = запросов в су
 
 #### Сетевой трафик
 
-Расчётные размеры обмена согласованы с размерами объектов выше. Для регистрации с передачей полного профиля и для создания или изменения полного резюме принято `100 + 5 = 105 Кбайт` на запрос и ответ вместе. Для просмотра работодателем резюме вместе с сопроводительным письмом принято `100 + 10 + 5 = 115 Кбайт`; это тот же API-вызов, а не дополнительный запрос. Для отправки отклика с письмом — `11 + 2 = 13 Кбайт`. Для создания, изменения или просмотра полной вакансии принято `50 + 5 = 55 Кбайт`. Дополнительные байты учитывают представление ответа, параметры и сопутствующий небольшой запрос. Изменения консервативно считаются передачей полного объекта; частичные обновления могут быть меньше. Эти размеры не являются измеренными средними значениями.
+Для создания аккаунта и последующего первичного заполнения профиля выделен суммарный сетевой бюджет `1 + 99 + 5 = 105 Кбайт` на пользователя. Здесь 1 Кбайт относится к учётной записи, 99 Кбайт к профилю, 5 Кбайт к параметрам и ответам. Действия выполняются отдельными запросами и объединены в строке сетевого бюджета нового пользователя. Для создания или изменения полного резюме принято `100 + 5 = 105 Кбайт`, для просмотра резюме вместе с письмом — `100 + 10 + 5 = 115 Кбайт`. Отправка отклика с письмом требует `11 + 2 = 13 Кбайт`, операции полной вакансии — `50 + 5 = 55 Кбайт`. Размеры обмена являются расчётными бюджетами.
 
 Поисковая выдача включает одну страницу из 20 кратких представлений вакансий: `20 × 2,5 = 50 Кбайт`, без полного описания каждой вакансии. Списки откликов содержат идентификаторы, статусы и краткие сведения, но не полный текст писем, резюме или карточки компаний; для них сохранены оценки 30 и 40 Кбайт на страницу. Письмо возвращается только при открытии отклика вместе с резюме. Изменение статуса не пересылает текст письма. Авторизация и обновление сессии передают данные входа, session cookie и CSRF-токен; для этого обмена сохранён бюджет 3 Кбайт. Карточка компании не имеет отдельного типа запроса в текущей модели MVP; в ответах вакансий учитывается только краткое представление компании.
 
@@ -183,7 +183,7 @@ RPS в наиболее загруженный час = запросов в су
 
 | Тип трафика | Расчётный объём запроса и ответа | Объём в сутки | Пропускная способность в пиковый час |
 |---|---:|---:|---:|
-| Регистрация | 105 Кбайт | 3,465 Гбайт | 0,002 Гбит/с |
+| Новый аккаунт и первичное заполнение профиля, суммарно | 105 Кбайт | 3,465 Гбайт | 0,002 Гбит/с |
 | Авторизация и сессии | 3 Кбайт | 20,4 Гбайт | 0,009 Гбит/с |
 | Поисковая выдача вакансий | 50 Кбайт | 1 615 Гбайт | 0,718 Гбит/с |
 | Карточки вакансий | 55 Кбайт | 4 263,6 Гбайт | 1,895 Гбит/с |
@@ -331,7 +331,7 @@ IP-геолокация может быть неточной для пользо
 
 После восстановления трафик возвращается постепенно: `10% → 25% → 50% → штатный вес`. Между этапами проверяются частота ошибок, задержка и загрузка площадки. Это предотвращает перегрузку восстановленного ДЦ и резкий рост запросов при холодных кешах.
 
-Backend-узлы не хранят пользовательские сессии локально. Браузер передаёт случайный ID в cookie, а backend получает состояние сессии из общего Redis Cluster, доступного из любого ДЦ. Привязка пользователя к одному backend или ДЦ не требуется. Для записывающих операций, которые клиент или прокси может повторить после сетевой ошибки, используется idempotency key, предотвращающий создание дублирующих откликов, резюме и вакансий.
+Браузер передаёт случайный ID сессии в cookie. Backend обращается к общему Redis сессий, состоящему из primary и двух полных replica в разных ДЦ. Sentinel сообщает адрес текущего primary, поэтому сессия доступна при обслуживании пользователя любой площадкой. Для повторяемых записывающих операций используется idempotency key, предотвращающий создание дублирующих откликов, резюме и вакансий.
 
 ### 3.6. Использование Anycast и отклонённые варианты
 
@@ -634,7 +634,7 @@ erDiagram
         number version
         datetime updated_at
     }
-    users ||--|| profiles : has
+    users ||--o| profiles : has
     users ||--o{ sessions : opens
     users ||--o{ resumes : owns
     users ||--o{ company_members : participates
@@ -801,7 +801,7 @@ erDiagram
 | Таблица / набор | Назначение и срок жизни |
 |---|---|
 | `users` | Учётная запись: уникальный нормализованный email, хеш пароля, роль и состояние; пароль открытым текстом не хранится |
-| `profiles` | Имя, контакты, регион, настройки и необязательная ссылка на аватарку; один профиль на аккаунт |
+| `profiles` | Имя, контакты, регион, настройки и необязательная ссылка на аватарку, до одного профиля на аккаунт, создаётся при первом сохранении |
 | `companies` | Название, описание, контакты и необязательная ссылка на логотип компании |
 | `company_members` | Связь пользователя и компании, роль и активность; источник проверки прав работодателя |
 | `sessions` | Серверные сессии устройств: пользователь, CSRF-токен и сроки действия; cookie содержит только случайный ID. Допущение — две сессии на пользователя MAU: `33 млн × 2 = 66 млн`; до 30 дней неактивности, абсолютный срок 90 дней |
@@ -856,8 +856,8 @@ QPS — логические обращения к набору данных: о
 - `company_members`: `3 + 95 + 25 + 21 = 144 QPS` проверки прав;
 - `vacancies`: `4 307 + 3 + 35 + 2 + 5 = 4 352 QPS` чтения — карточки, изменение, приём откликов, истечение и повторное чтение индексатором;
 - `companies`: `4 307 + 3 + 5 = 4 315 QPS` чтения — карточки, изменение вакансий и индексатор;
-- новые компании и членства: `2 регистрации/с × 5% работодателей = 0,10 QPS` записи. Перенос 5% на регистрации — допущение; не каждая авторизация создаёт компанию;
-- профиль читается при подготовке/проверке редактируемого резюме — до 8 QPS. Отдельные API изменения профиля сверх текущей модели не добавлены.
+- Темп создания компаний и членств оценивается как `2 новых аккаунта/с × 5% работодателей = 0,10 QPS`. Доля 5% служит допущением для оценки роста данных. Создание компании выполняется отдельным действием.
+- Профиль читается при подготовке и проверке редактируемого резюме, до 8 QPS. Первое сохранение профиля оценивается в 2 QPS по темпу появления новых аккаунтов. Для ёмкости принят верхний бюджет 60 млн заполненных профилей на пятилетнем горизонте, запись появляется при первом сохранении пользователем.
 
 Фоновое истечение ограничено двумя вакансиями/с: `ceil(25 946 × 0,20 / 3 600) = 2`. Вместе с тремя изменениями вакансий получается пять событий/с. Поэтому запись вакансий и обновление поиска равны 5 QPS. Это входной поток; индексатор должен уметь обрабатывать его быстрее при накоплении отставания.
 
@@ -905,7 +905,7 @@ Outbox и очередь вмещают по `5 × 86 400 = 432 000` событ�
 
 | API и пиковый RPS всей системы | Чтение и проверки | Запись |
 |---|---|---|
-| Регистрация — 2 | `users`: email | `users`, `profiles`, для работодателя `companies` и `company_members`; идемпотентность |
+| Регистрация — 2 | `users`, уникальность email | Учётная запись `users`, идемпотентность |
 | Вход/управление сессией — 378 | `users`, при наличии cookie — `sessions` | Создание, удаление или продление серверной сессии |
 | Поиск — 1 795 | `reference_cache`, один запрос к `vacancy_search` | Нет пользовательской записи или заполнения кеша страниц |
 | Карточка вакансии — 4 307 | `vacancies` и краткие поля `companies`, напрямую | Нет заполнения кеша карточек |
@@ -921,7 +921,7 @@ Outbox и очередь вмещают по `5 × 86 400 = 432 000` событ�
 
 Кеш карточек убран ради упрощения и отказа от неподтверждённого hit ratio 90%. Это не утверждение, что PostgreSQL гарантированно выдерживает любую смесь 7 тыс. запросов/с. Внешний RPS не равен SQL QPS; в этой модели исходные вакансии получают 4 352 QPS чтения, компании — 4 315. Производительность зависит от запросов, физического объёма, памяти, индексов, оборудования и допустимой задержки. Если PostgreSQL будет выбран, нагрузка проверяется собственным сценарием, например через pgbench [[22]](#source22). Буферный кеш самой СУБД не исчезает при отказе от отдельного прикладного кеша. Сейчас из архитектуры исключён дополнительный обязательный пул RAM для карточек, но ёмкость базы ещё не доказана тестом.
 
-Поиск выполняется не полным сканированием исходных вакансий на каждый HTTP-запрос, а через `vacancy_search`. Elasticsearch рассматривается как целевой механизм этой проекции; число индексов, шардов, реплик и конкретные настройки будут выбраны в физической схеме. В логической ER остаются только документ и его связь с исходной вакансией.
+Поиск использует `vacancy_search`. Elasticsearch выполняет полнотекстовый поиск и фильтрацию по этой проекции. Физическая схема определяет размещение основной копии всего индекса и двух полных replica. Логическая ER показывает документ и связь с исходной вакансией.
 
 Пользовательская составляющая QPS распределяется по ДЦ как 34/33/33%, при отказе площадки — 50/50. Для проверки цели 4 600 RPS площадки используется смесь API с коэффициентом `4 600 / 7 028 ≈ 0,655`. Фоновые задания, копии, репликация и догоняющая обработка считаются отдельно. Сохранение письма не добавляет новый HTTP-вызов, но увеличивает байты чтения/записи; списки проецируют краткие поля и не читают полный текст без необходимости.
 
@@ -933,8 +933,9 @@ Outbox и очередь вмещают по `5 × 86 400 = 432 000` событ�
 
 | Данные | Требование |
 |---|---|
-| Аккаунты, профили, компании и членство | Уникальный email, согласованное создание, актуальные права; отозванное членство не разрешает новую операцию |
-| Сессии | Атомарная проверка срока и продление существующего ключа; продление после удаления не создаёт ключ заново. При штатном выходе запись удаляется, следующие проверки отклоняют ID. Чтение только владельца шарда; асинхронный failover Redis допускает потерю последних изменений, RPO 0 для сессий не заявляется |
+| Аккаунты и профили | Уникальный email, создание аккаунта при регистрации, отдельное сохранение профиля по `user_id` |
+| Компании и членство | Проверка компании и представителя при создании членства, актуальные права для действий работодателя |
+| Сессии | Атомарная проверка срока и продление существующего ключа на текущем primary. При выходе запись удаляется. Две replica получают изменения асинхронно, при failover допускается потеря последних изменений сессий |
 | Резюме и вакансии | Read-your-writes владельцу, условное обновление по версии; исходные карточки не зависят от отставания поиска |
 | Отклики и письма | Одна активная пара; текст письма и отклик сохраняются атомарно. После успеха доступно подтверждённое состояние, смена статуса не меняет отправленное письмо |
 | Идемпотентность | Один исполнитель на `(actor_key, route, client_key)`, совпадение хеша полного запроса; результат согласован с бизнес-записью, окно 24 часа |
@@ -977,25 +978,42 @@ TTL не удаляет недоставленные события: 432 тыс.
 
 ### 6.1. Хранилища и границы физической модели
 
-Основные данные хранятся в PostgreSQL: нужны транзакции, ограничения уникальности, условные обновления и восстановление на момент времени. Полнотекстовый поиск вынесен в Elasticsearch; прикладного кеша карточек вакансий и кеша результатов поиска нет. Redis хранит серверные сессии в общем кластере и краткоживущие лимиты в отдельных локальных парах, Kafka — для доставки событий и буфера журналов, ClickHouse — для технических журналов, Ceph RGW с S3 API — для файлов.
+Основные данные хранятся в PostgreSQL с транзакциями, ограничениями уникальности и восстановлением на момент времени. Полнотекстовый поиск выполняет Elasticsearch с одной основной копией всего индекса и двумя полными replica. Общий Redis сессий содержит один primary и две полные replica, локальные пары Redis обслуживают лимиты. Kafka доставляет события и буферизует логи, ClickHouse хранит технические журналы, Ceph RGW предоставляет S3 API для файлов.
 
-Расчёт опирается на **7 028 RPS всей системы**, **3 514 RPS на оставшийся ДЦ при отказе одной площадки** и цель **4 600 RPS на ДЦ с резервом**. Это разные уровни: один HTTP-запрос может вызвать несколько SQL-запросов, а запрос к поиску — обращения к нескольким шардам. Пиковые QPS наборов данных взяты из раздела 5. Шардинг ниже определяется прежде всего объёмом за пять лет, а не предположением, что PostgreSQL не способен обслужить 7 тыс. запросов/с.
+Расчёт опирается на **7 028 RPS всей системы**, **3 514 RPS на оставшийся ДЦ при отказе одной площадки** и цель **4 600 RPS на ДЦ с резервом**. Один HTTP-запрос может вызвать несколько обращений к хранилищам. Для PostgreSQL выбраны **10 целевых БД в четырёх HA-группах** Core, Catalogue, Resume и Applications. Резюме и отклики размещены каждый в одной БД. Ёмкость узла рассчитывается по сумме данных всех БД своей HA-группы.
 
-Все размеры десятичные. Логические байты из раздела 5 не включают физические индексы, WAL и реплики. Для PostgreSQL принят предварительный множитель **1,3** на таблицы, TOAST, индексы и рабочее разрастание; сжатие не уменьшает расчёт. Отдельно оставляется не менее **30% свободного диска**, в том числе под WAL, обслуживание и временные файлы. Это бюджеты, которые нужно проверить на загруженной базе, а не универсальные свойства СУБД.
+Каждой БД назначены владелец-сервис, отдельная роль приложения и миграции. Обращения к данным другого владельца проходят через его внутренний API. HA-группа определяет общие ресурсы, физическую репликацию и переключение primary всех размещённых в ней БД [[48]](#source48).
+
+| HA-группа | Целевая БД | Владелец | Таблицы |
+|---|---|---|---|
+| PG-Core | `auth_db` | Сервис авторизации | `users`, `operation_receipts` |
+| PG-Core | `profiles_db` | Сервис профилей | `profiles` |
+| PG-Core | `companies_db` | Сервис компаний | `companies` |
+| PG-Core | `members_db` | Сервис прав компаний | `company_members` |
+| PG-Core | `dictionaries_db` | Сервис справочников | `reference_values` |
+| PG-Core | `files_db` | Сервис файлов | `file_metadata` |
+| PG-Core | `idempotency_db` | Координатор команд | `idempotency_keys` |
+| PG-Catalogue | `vacancies_db` | Сервис вакансий и его воркеры | `vacancies`, `outbox_events`, `consumer_receipts`, `operation_receipts` |
+| PG-Resume | `resumes_db` | Сервис резюме | `resumes`, `operation_receipts` |
+| PG-Applications | `applications_db` | Сервис откликов | `applications`, `operation_receipts` |
+
+Outbox и квитанции размещены в БД соответствующей бизнес-записи для совместного локального commit. Связи между целевыми БД проверяются через сервисы. Внутри Core используются отдельные соединения для каждой БД.
+
+Все размеры десятичные. Логические байты из раздела 5 не включают физические индексы, WAL и реплики. Для PostgreSQL принят предварительный множитель **1,3** на таблицы, TOAST, индексы и рабочее разрастание; сжатие не уменьшает расчёт. Минимальная полезная ёмкость диска узла определяется как **`логический объём × 1,3 / 0,7`**, чтобы расчётные данные занимали не более 70%. Не менее **30% диска остаётся свободным**, в том числе под WAL, обслуживание и временные файлы. Это бюджеты, которые нужно проверить на загруженной базе, а не универсальные свойства СУБД.
 
 ```mermaid
 flowchart TB
     APP["Backend всех трёх ДЦ"]
     POOL["В каждом ДЦ: 2 шлюза БД<br/>PgBouncer transaction pooling + HAProxy"]
-    CORE["PG-Core: 1 HA-группа<br/>аккаунты, компании, метаданные"]
-    CAT["PG-Catalogue: 1 HA-группа<br/>вакансии + outbox + квитанции"]
-    RES["PG-Resume: 2 HA-группы<br/>16 логических бакетов"]
-    APPL["PG-Applications: 4 HA-группы<br/>32 логических бакета"]
+    CORE["PG-Core: 7 целевых БД<br/>auth / profiles / companies / members<br/>dictionaries / files / idempotency"]
+    CAT["PG-Catalogue: vacancies_db<br/>вакансии + outbox + квитанции"]
+    RES["PG-Resume: resumes_db<br/>резюме + квитанции"]
+    APPL["PG-Applications: applications_db<br/>отклики + квитанции"]
     HA["Каждая PG-группа: 3 узла<br/>1 primary + 2 standby, по одному на ДЦ<br/>синхронное подтверждение минимум из двух ДЦ"]
-    SEARCH["Elasticsearch<br/>4 primary shards + 2 replicas каждого<br/>6 data-узлов, по 2 на ДЦ"]
+    SEARCH["Elasticsearch: 3 узла, по одному на ДЦ<br/>основная копия индекса + 2 полные replica<br/>поиск на всех трёх копиях"]
     BROKER["Kafka: 3 брокера, по одному на ДЦ<br/>RF=3, min ISR=2"]
     CH["ClickHouse: 1 shard, 3 replicas<br/>по одной реплике на ДЦ"]
-    AUTH["Redis Cluster: серверные сессии<br/>3 primary shards + по 2 replica<br/>9 узлов, по 3 на ДЦ"]
+    AUTH["Redis сессий: 3 узла, по одному на ДЦ<br/>1 primary + 2 полные replica<br/>3 Sentinel для переключения"]
     LIMIT["Redis: отдельная пара primary/replica в каждом ДЦ<br/>только rate limiting"]
     FILES["Ceph RGW / S3<br/>3 копии объекта в разных ДЦ"]
     CDN["CDN: статика, аватарки, логотипы"]
@@ -1010,20 +1028,20 @@ flowchart TB
     FILES --> CDN
 ```
 
-Active-active приложений не означает multi-master одной SQL-записи. У каждой PostgreSQL HA-группы единственный доступный для записи primary; из любого ДЦ запрос маршрутизируется к нему. Восемь групп дают восемь независимых primary и **24 экземпляра PostgreSQL** с учётом двух standby каждой группы. Синхронная межрегиональная запись повышает задержку; каналы между ДЦ и допустимая задержка подтверждения являются обязательными условиями проекта.
+Active-active приложений не означает multi-master одной SQL-записи. У каждой PostgreSQL HA-группы единственный доступный для записи primary; из любого ДЦ запрос маршрутизируется к нему. Четыре группы дают четыре независимых primary и **12 экземпляров PostgreSQL** с учётом двух standby каждой группы. Синхронная межрегиональная запись повышает задержку; каналы между ДЦ и допустимая задержка подтверждения являются обязательными условиями проекта.
 
 ### 6.2. Физические ER-диаграммы
 
-Префикс сущности обозначает конкретное хранилище и группу. В PostgreSQL `uuid`, `text`, `jsonb`, `bigint`, `timestamptz` — физические типы. Составные поля опыта, образования, навыков и контактов хранятся как `jsonb`; отдельный GIN по ним не создаётся, поскольку поиск по резюме отсутствует в MVP. Длинные тексты выносятся механизмом TOAST, поэтому списки выбирают только краткие столбцы.
+Префикс PostgreSQL-сущности обозначает целевую БД, её HA-группа приведена в таблице размещения. `uuid`, `text`, `jsonb`, `bigint`, `timestamptz` — физические типы. Составные поля резюме хранятся как `jsonb`. Для списков выбираются краткие столбцы, большие значения обслуживаются механизмом TOAST.
 
-Сплошная связь с подписью FK означает локальный внешний ключ; пунктирная — проверяемую сервисом связь между разными хранилищами/шардами. PostgreSQL не может обеспечить внешний ключ между независимыми HA-группами. Для Kafka координата записи — `(partition, offset)`, для S3 — ключ объекта, для Redis — составной строковый ключ; это не SQL-таблицы. Индексы и размещение каждого набора перечислены сразу после диаграмм.
+Сплошная связь с подписью FK означает внешний ключ внутри одной БД. Пунктирная связь проверяется приложением через API владельца данных. Отдельные БД одной HA-группы также имеют межбазовые ссылки. Для Kafka координата записи — `(partition, offset)`, для S3 — ключ объекта, для Redis — строковый ключ.
 
-#### PostgreSQL: общие аккаунты, доступ и метаданные — PG-Core
+#### PostgreSQL — семь целевых БД внутри PG-Core
 
 ```mermaid
 erDiagram
-    PG_CORE_users {
-        uuid user_id PK "PG-Core; RF3"
+    PG_AUTH_users {
+        uuid user_id PK "auth_db; PG-Core; RF3"
         text email_normalized UK
         text password_hash
         text role
@@ -1031,36 +1049,36 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
-    PG_CORE_profiles {
-        uuid user_id PK, FK
+    PG_PROFILES_profiles {
+        uuid user_id PK "cross-database user reference"
         text display_name
         jsonb contacts
         text region_code
         jsonb preferences
-        uuid avatar_file_id FK "optional"
+        uuid avatar_file_id "files_db; optional"
         bigint version
         timestamptz updated_at
     }
-    PG_CORE_companies {
+    PG_COMPANIES_companies {
         uuid company_id PK
         text name
         text description
         jsonb contacts
         text state
-        uuid logo_file_id FK "optional"
+        uuid logo_file_id "files_db; optional"
         bigint version
         timestamptz created_at
         timestamptz updated_at
     }
-    PG_CORE_company_members {
-        uuid company_id PK, FK
-        uuid user_id PK, FK
+    PG_MEMBERS_company_members {
+        uuid company_id PK "cross-database company reference"
+        uuid user_id PK "cross-database user reference"
         text role
         boolean is_active
         timestamptz created_at
         timestamptz updated_at
     }
-    PG_CORE_reference_values {
+    PG_DICTIONARIES_reference_values {
         text kind PK
         text code PK
         text name
@@ -1069,11 +1087,11 @@ erDiagram
         bigint version
         timestamptz updated_at
     }
-    PG_CORE_idempotency_keys {
+    PG_IDEMPOTENCY_idempotency_keys {
         text actor_key PK
         text route PK
         text client_key PK
-        uuid actor_user_id FK "optional"
+        uuid actor_user_id "auth_db; optional"
         bytea request_hash
         text state
         bigint result_code
@@ -1082,11 +1100,10 @@ erDiagram
         timestamptz completed_at
         timestamptz expires_at "IX expiry"
         uuid operation_id UK
-        text target_group "immutable operation route"
-        smallint target_bucket
+        text target_database "immutable database route"
         timestamptz lease_until
     }
-    PG_CORE_file_metadata {
+    PG_FILES_file_metadata {
         uuid file_id PK
         text object_key UK
         text purpose
@@ -1100,11 +1117,11 @@ erDiagram
         uuid owner_user_id "IX owner"
         uuid owner_company_id "IX owner"
     }
-    PG_CORE_users ||--|| PG_CORE_profiles : FK
-    PG_CORE_users ||--o{ PG_CORE_company_members : FK
-    PG_CORE_companies ||--o{ PG_CORE_company_members : FK
-    PG_CORE_file_metadata |o--o| PG_CORE_profiles : avatar_FK
-    PG_CORE_file_metadata |o--o| PG_CORE_companies : logo_FK
+    PG_AUTH_users ||..o| PG_PROFILES_profiles : user_id_validated
+    PG_AUTH_users ||..o{ PG_MEMBERS_company_members : user_id_validated
+    PG_COMPANIES_companies ||..o{ PG_MEMBERS_company_members : company_id_validated
+    PG_FILES_file_metadata |o..o| PG_PROFILES_profiles : avatar_validated
+    PG_FILES_file_metadata |o..o| PG_COMPANIES_companies : logo_validated
 ```
 
 #### PostgreSQL: резюме, вакансии и отклики
@@ -1112,8 +1129,7 @@ erDiagram
 ```mermaid
 erDiagram
     PG_RESUME_resumes {
-        smallint bucket_id PK "hash owner mod16; 2 HA groups"
-        uuid resume_id PK
+        uuid resume_id PK "resumes_db; PG-Resume; RF3"
         uuid owner_user_id "IX owner-time"
         text title
         jsonb contacts
@@ -1132,8 +1148,8 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
-    PG_CATALOGUE_vacancies {
-        uuid vacancy_id PK
+    PG_VACANCIES_vacancies {
+        uuid vacancy_id PK "vacancies_db; PG-Catalogue; RF3"
         uuid company_id "IX company-time"
         uuid author_user_id
         text title
@@ -1153,8 +1169,7 @@ erDiagram
         timestamptz updated_at
     }
     PG_APPLICATIONS_applications {
-        smallint bucket_id PK "hash applicant mod32; 4 HA groups"
-        uuid application_id PK
+        uuid application_id PK "applications_db; PG-Applications; RF3"
         uuid applicant_user_id "IX applicant-time"
         uuid resume_id
         uuid vacancy_id "IX vacancy-time; active-pair UK"
@@ -1169,7 +1184,7 @@ erDiagram
         timestamptz status_changed_at
         bigint version
     }
-    PG_CATALOGUE_outbox_events {
+    PG_VACANCIES_outbox_events {
         uuid event_id PK
         uuid vacancy_id FK
         bigint vacancy_version
@@ -1181,7 +1196,7 @@ erDiagram
         timestamptz next_attempt_at "IX pending"
         timestamptz expires_at "IX expiry"
     }
-    PG_CATALOGUE_consumer_receipts {
+    PG_VACANCIES_consumer_receipts {
         text consumer_id PK
         uuid event_id PK
         timestamptz processed_at
@@ -1189,7 +1204,6 @@ erDiagram
     }
     PG_TARGET_operation_receipts {
         uuid operation_id PK
-        smallint bucket_id
         bytea request_hash
         integer result_code
         uuid result_id
@@ -1197,13 +1211,14 @@ erDiagram
         timestamptz expires_at "IX expiry"
     }
     PG_RESUME_resumes ||..o{ PG_APPLICATIONS_applications : validated_resume_id
-    PG_CATALOGUE_vacancies ||..o{ PG_APPLICATIONS_applications : validated_vacancy_id
-    PG_CATALOGUE_vacancies ||--o{ PG_CATALOGUE_outbox_events : local_FK
-    PG_CATALOGUE_outbox_events ||..o{ PG_CATALOGUE_consumer_receipts : event_id
+    PG_VACANCIES_vacancies ||..o{ PG_APPLICATIONS_applications : validated_vacancy_id
+    PG_VACANCIES_vacancies ||--o{ PG_VACANCIES_outbox_events : local_FK
+    PG_VACANCIES_outbox_events ||..o{ PG_VACANCIES_consumer_receipts : event_id
     PG_TARGET_operation_receipts ||..o| PG_APPLICATIONS_applications : local_transaction
+    PG_TARGET_operation_receipts ||..o| PG_AUTH_users : registration_transaction
 ```
 
-`PG_TARGET_operation_receipts` — одинаковая служебная таблица в каждой целевой группе PG-Resume, PG-Catalogue и PG-Applications. Она не является отдельной общей БД. Квитанция операции и изменение бизнес-записи фиксируются одной локальной транзакцией. Назначение описано в подразделе 6.5.
+`PG_TARGET_operation_receipts` показывает структуру служебной таблицы, размещённой в четырёх БД `auth_db`, `resumes_db`, `vacancies_db`, `applications_db`. Каждая копия хранит результаты команд своей БД. При регистрации аккаунт и квитанция результата фиксируются одной транзакцией `auth_db`.
 
 #### Поиск, файлы, кеши и буферы
 
@@ -1219,7 +1234,7 @@ erDiagram
         timestamptz enqueued_at
     }
     ES_vacancy_search {
-        keyword vacancy_id PK "_id; 4 shards; 2 replicas"
+        keyword vacancy_id PK "_id; full index; 3 copies"
         keyword company_id
         text title
         text description
@@ -1244,7 +1259,7 @@ erDiagram
         timestamp loaded_at
     }
     REDIS_SESSION_sessions {
-        string session_key PK "SHA-256 cookie ID; 3 shards; RF3"
+        string session_key PK "SHA-256 cookie ID; primary and 2 replicas"
         uuid user_id
         binary csrf_token
         string device_id
@@ -1296,7 +1311,7 @@ erDiagram
         String actor_hash
         LowCardinality_String dc
     }
-    PG_CORE_users ||..o{ REDIS_SESSION_sessions : user_identity
+    PG_AUTH_users ||..o{ REDIS_SESSION_sessions : user_identity
     KAFKA_event_queue ||..o| ES_vacancy_search : versioned_upsert
     S3_file_objects ||..o| CDN_cdn_cache : immutable_key
     KAFKA_request_log_buffer ||..o| CH_request_logs : batched_insert
@@ -1306,39 +1321,39 @@ erDiagram
 
 ### 6.3. Выбор СУБД, индексы и размещение по наборам данных
 
-`B-tree` применяется по умолчанию для индексов PostgreSQL. `DESC` задаёт порядок времени в списке. Все индексы откликов и резюме создаются на каждой локальной партиции; первичный ключ включает `bucket_id`. Термин «бакет» здесь означает заранее выделенную логическую часть данных, а не бакет S3.
+`B-tree` применяется по умолчанию для индексов PostgreSQL. `DESC` задаёт порядок времени в списке. Для резюме и откликов выделено по одной HA-группе без шардирования и бакетных партиций; первичные ключи — `resume_id` и `application_id`.
 
 | Таблица / набор | СУБД и назначение | Индексы / физический ключ | Шардирование и резервирование |
 |---|---|---|---|
-| `users` | PostgreSQL, PG-Core; учётные записи | PK `user_id`; UNIQUE `email_normalized` | Без шардинга; 1 primary + 2 standby в разных ДЦ |
-| `profiles` | PostgreSQL, PG-Core; профиль | PK/FK `user_id`; FK `avatar_file_id`; индекс ссылки для удаления файла | Без шардинга; та же HA-группа Core |
-| `companies` | PostgreSQL, PG-Core; исходная компания | PK `company_id`; FK и индекс `logo_file_id` | Без шардинга; та же HA-группа Core |
-| `company_members` | PostgreSQL, PG-Core; актуальные права | PK `(company_id,user_id)`; `(user_id,company_id)`; FK на компанию и пользователя | Без шардинга; та же HA-группа Core |
-| `sessions` | Redis Cluster, отдельный от лимитов; серверная авторизация | Ключ `session:<namespace>:SHA256(session_id)`; значение String с упакованными полями; TTL, SQL-индексов и FK нет | 16 384 hash slots, 3 primary shard, по 2 replica; копии каждого шарда в трёх ДЦ |
-| `resumes` | PostgreSQL, PG-Resume; исходное резюме | PK `(bucket_id,resume_id)`; `(bucket_id,owner_user_id,updated_at DESC,resume_id DESC)` | 16 бакетов по владельцу, 2 HA-группы; по 3 узла |
-| `vacancies` | PostgreSQL, PG-Catalogue; исходная вакансия | PK `vacancy_id`; `(company_id,published_at DESC,vacancy_id DESC)`; частичный `(expires_at,vacancy_id) WHERE status='published'` | Пока без шардинга; 1 primary + 2 standby |
-| `applications` | PostgreSQL, PG-Applications; отклик с письмом | PK `(bucket_id,application_id)`; частичный UNIQUE активной пары; индексы списков по соискателю, компании и вакансии, индекс `accepted_at` для хранения | 32 бакета по соискателю, 4 HA-группы; по 3 узла |
-| `reference_values` | PostgreSQL, PG-Core; источник справочников | PK `(kind,code)`; `(kind,parent_code)` | Без шардинга; HA Core |
-| `idempotency_keys` | PostgreSQL, PG-Core; глобальная уникальность ключа операции | PK `(actor_key,route,client_key)`; UNIQUE `operation_id`; `expires_at` | Без шардинга; HA Core; нельзя независимо зарезервировать один ключ в разных группах |
-| `outbox_events` | PostgreSQL, PG-Catalogue; сохранность изменений поиска | PK `event_id`; `(next_attempt_at,event_id) WHERE processed_at IS NULL`; `(expires_at,event_id) WHERE processed_at IS NOT NULL`; FK `vacancy_id` | Вместе с исходной вакансией; HA Catalogue |
+| `users` | PostgreSQL, `auth_db` в PG-Core | PK `user_id`, UNIQUE `email_normalized` | Без шардинга, HA Core |
+| `profiles` | PostgreSQL, `profiles_db` в PG-Core | PK `user_id`, индекс `avatar_file_id`, ссылки проверяет сервис | Без шардинга, HA Core |
+| `companies` | PostgreSQL, `companies_db` в PG-Core | PK `company_id`, индекс `logo_file_id` | Без шардинга, HA Core |
+| `company_members` | PostgreSQL, `members_db` в PG-Core | PK `(company_id,user_id)`, индекс `(user_id,company_id)`, межбазовые ссылки | Без шардинга, HA Core |
+| `sessions` | Общий Redis сессий, отдельный от лимитов | Ключ `session:<namespace>:SHA256(session_id)`, String с полями сессии, TTL | Один primary и две полные replica, по узлу на ДЦ, переключение через три Sentinel |
+| `resumes` | PostgreSQL, `resumes_db` в PG-Resume | PK `resume_id`, индекс `(owner_user_id,updated_at DESC,resume_id DESC)` | Без шардинга, HA Resume |
+| `vacancies` | PostgreSQL, `vacancies_db` в PG-Catalogue | PK `vacancy_id`, индекс `(company_id,published_at DESC,vacancy_id DESC)`, частичный индекс срока опубликованных вакансий | Без шардинга, HA Catalogue |
+| `applications` | PostgreSQL, `applications_db` в PG-Applications | PK `application_id`, частичный UNIQUE активной пары, индексы списков и `accepted_at` | Без шардинга, HA Applications |
+| `reference_values` | PostgreSQL, `dictionaries_db` в PG-Core | PK `(kind,code)`, индекс `(kind,parent_code)` | Без шардинга, HA Core |
+| `idempotency_keys` | PostgreSQL, `idempotency_db` в PG-Core | PK `(actor_key,route,client_key)`, UNIQUE `operation_id`, индекс `expires_at` | Единая БД ключей команд, HA Core |
+| `outbox_events` | PostgreSQL, `vacancies_db` в PG-Catalogue | PK `event_id`, частичные индексы по `next_attempt_at` и `expires_at`, локальный FK `vacancy_id` | В одной БД с вакансией, HA Catalogue |
 | `event_queue` | Kafka, топик `vacancy-events` | Ключ `vacancy_id`; координата `(partition,offset)`, не уникальность `event_id` | 6 партиций, RF=3, `min.insync.replicas=2`, по брокеру на ДЦ |
-| `consumer_receipts` | PostgreSQL, PG-Catalogue; дедупликация индексатора | PK `(consumer_id,event_id)`; `expires_at` | Без шардинга; HA Catalogue |
-| `vacancy_search` | Elasticsearch, индекс `vacancies_v1`, alias `vacancies_read` | `_id=vacancy_id`; инвертированный индекс текста, doc values для фильтров/сортировки | 4 primary shards, 2 replicas каждого, 3 копии в разных ДЦ |
-| `reference_cache` | Память каждого процесса приложения | Хеш-таблица `(kind,code)`, атомарная смена целой версии | Реплика в каждом процессе; восстановление из PG-Core, отдельный Redis не требуется |
+| `consumer_receipts` | PostgreSQL, `vacancies_db` в PG-Catalogue | PK `(consumer_id,event_id)`, индекс `expires_at` | В одной БД с outbox, HA Catalogue |
+| `vacancy_search` | Elasticsearch, индекс `vacancies_v1`, alias `vacancies_read` | `_id=vacancy_id`, инвертированный индекс текста, doc values для фильтров и сортировки | Одна основная копия всего индекса и две полные replica, по узлу на ДЦ |
+| `reference_cache` | Память процесса приложения | Хеш-таблица `(kind,code)`, атомарная смена версии | Копия сервиса справочников из `dictionaries_db` |
 | `rate_limit_counters` | Redis, локальные лимиты ДЦ | Ключ `scope:subject_hash:window_start`, значение integer; Lua `INCR + EXPIRE` | 1 primary + 1 replica на ДЦ, 3 Sentinel на разных хостах ДЦ; к общему кластеру сессий не относится |
-| `file_metadata` | PostgreSQL, PG-Core; описание файлов и владельцы | PK `file_id`; UNIQUE ключи основного файла и миниатюры; индексы владельцев и `created_at` | Без шардинга; HA Core; FK из профиля/компании |
+| `file_metadata` | PostgreSQL, `files_db` в PG-Core | PK `file_id`, UNIQUE ключи вариантов, индексы владельцев и `created_at` | Без шардинга, HA Core, межбазовые ссылки |
 | `file_objects` | Ceph RGW, S3-бакеты `static` и `images` | Неизменяемые ключи `purpose/file_id/version/variant`; checksum | CRUSH по ключу, 3 копии в разных ДЦ, `size=3, min_size=2` |
 | `cdn_cache` | CDN провайдера, копии объектов | Ключ URL с версией; TTL до суток | Распределение по edge-узлам провайдера; origin — S3, источник истины вне CDN |
 | `request_log_buffer` | Kafka, топик `api-logs` | Ключ `request_id`, координата `(partition,offset)` | 12 партиций, RF=3, min ISR=2; хранение 15 минут |
 | `request_logs` | ClickHouse, ReplicatedMergeTree | `PARTITION BY toDate(timestamp)`; `ORDER BY (route,timestamp,event_id)`; TTL 7 суток | 1 shard × 3 replicas, по реплике на ДЦ; 3 ClickHouse Keeper |
-| `operation_receipts` — физическая служебная таблица | PostgreSQL в целевой HA-группе; результат операции между группами | PK `operation_id`; `expires_at`; хеш запроса, код и ID результата | Вместе с бизнес-записью, не отдельный шард; по 3 копии средствами HA группы |
+| `operation_receipts` — физическая служебная таблица | PostgreSQL в `auth_db`, `resumes_db`, `vacancies_db`, `applications_db` | PK `operation_id`, индекс `expires_at`, хеш запроса и результат | Локальная транзакция с бизнес-записью, HA своей группы |
 
 Для откликов дополнительно создаются индексы:
 
 ```sql
-PRIMARY KEY (bucket_id, application_id);
-UNIQUE (bucket_id, vacancy_id, resume_id) WHERE is_active;
-INDEX (bucket_id, applicant_user_id, accepted_at DESC, application_id DESC);
+PRIMARY KEY (application_id);
+UNIQUE (vacancy_id, resume_id) WHERE is_active;
+INDEX (applicant_user_id, accepted_at DESC, application_id DESC);
 INDEX (company_id, accepted_at DESC, application_id DESC)
     INCLUDE (vacancy_id, resume_id, applicant_user_id, status);
 INDEX (vacancy_id, accepted_at DESC, application_id DESC);
@@ -1348,19 +1363,15 @@ CHECK (cover_letter IS NULL OR octet_length(cover_letter) <= 10000);
 
 Это перечень физических определений, а не готовая SQL-миграция: в `CREATE INDEX` также задаются имена и родительская таблица. `CHECK` ограничивает байты UTF-8, не число символов. Сопроводительное письмо не входит ни в один индекс. В списках оно не читается; выборка письма выполняется по ключу отклика. Для статусов действует `CHECK`: «Отказ» соответствует `is_active=false`, остальные два состояния — `true`.
 
-### 6.4. Шардинг, маршрутизация и денормализация
+### 6.4. Маршрутизация, отсутствие шардинга и денормализация
 
-**Резюме:** `bucket_id = stable_hash(owner_user_id) mod 16`. Первоначально бакеты 0–7 находятся в PG-Resume-1, 8–15 — в PG-Resume-2. Владелец неизменяемый, поэтому все его резюме попадают в один бакет. Внутри группы используются LIST-партиции по `bucket_id`, а не географические партиции.
+Сервис использует собственную целевую БД. Её имя определяет HA-группу и RW/RO-маршрут. В Core используются семь отдельных пулов БД с общим лимитом серверных соединений. Межсервисные данные получаются через API владельца, для списков используются краткие копии. ID резюме и отклика — UUID, размещение определяется типом данных.
 
-**Отклики:** `bucket_id = stable_hash(applicant_user_id) mod 32`. По восемь бакетов размещаются в PG-Applications-1…4. ID резюме и отклика содержит метку бакета в выделенных битах UUID; оставшиеся биты обеспечивают уникальность. Сервис проверяет метку и владельца, не доверяет клиентскому `bucket_id`. Алгоритм хеша и таблица «бакет → группа» версионируются. Изменение региона пользователя или отказ ДЦ не меняет шард.
+Все отклики находятся в `applications_db` группы PG-Applications. Частичный UNIQUE `(vacancy_id,resume_id) WHERE is_active` обеспечивает уникальность активной пары. Для текущего объёма таблица размещается без месячного партиционирования.
 
-Частичный UNIQUE активной пары работает локально: выбранное резюме всегда принадлежит одному неизменяемому соискателю, поэтому одинаковая пара `(vacancy_id,resume_id)` не может законно оказаться в разных бакетах. Это проверяется при приёме отклика. Партиционирование откликов по месяцу не применяется: локальный UNIQUE в отдельных месяцах не обеспечил бы уникальность пары между месяцами.
+Списки соискателя и работодателя выполняются одним SQL-запросом к PG-Applications. Страница содержит до 20 кратких строк без письма; сортировка — `(accepted_at DESC,application_id DESC)`, следующая страница выбирается условием «меньше последнего ключа». Пара полей NOT NULL и неизменяема. Курсор привязан к компании/фильтру и подписан HMAC; права проверяются при каждом запросе. Глубокий OFFSET и отдельное хранилище курсоров не нужны [[43]](#source43), [[46]](#source46).
 
-Список своих откликов обращается к одному бакету. Входящие отклики работодателя запрашиваются **параллельно из четырёх физических групп**, в каждой с индексом по компании/вакансии, затем объединяются по `(accepted_at,application_id)`. Для страницы из 20 строк достаточно получить не более 20 кратких строк из каждой группы и выбрать общие первые 20. Глубокий OFFSET не используется; применяется общий курсор. Частичный ответ при недоступности группы не выдаётся за полный список.
-
-Дополнительный fan-out работодателя равен `95 × (4 − 1) = 285 SQL-запросов/с`. Поэтому логические 535 QPS чтения откликов превращаются примерно в **820 SQL-запросов/с** по четырём группам до служебных повторов. Это не четыре загрузки полных писем на один отклик. Открытие конкретного письма и смена статуса идут в единственную группу по ID. Порядок слияния и контракт курсора определены в разделе 7.3.
-
-Для бюджета внутреннего обмена краткой строке выделено до 2 Кбайт с сериализацией: `4 × 20 × 2 = 160 Кбайт` на запрос работодателя, до `95 × 160 = 15 200 Кбайт/с`, или **15,2 Мбайт/с ≈ 0,122 Гбит/с** между backend и БД. Это верхняя оценка для четырёх заполненных страниц; клиент получает прежние 20 строк и 40 Кбайт. По сравнению с одной группой дополнительный внутренний поток — до 11,4 Мбайт/с. Он учитывается отдельно от API-трафика раздела 2.
+95 запросов списка работодателя/с создают 95 SQL-запросов/с. Суммарная исходная нагрузка чтения откликов остаётся **535 SQL-запросов/с** из раздела 5, до служебных повторов. При бюджете 2 Кбайт на краткую строку внутренний поток этого списка составляет до `95 × 20 × 2 = 3 800 Кбайт/с`, или **3,8 Мбайт/с ≈ 0,0304 Гбит/с**. Клиентская страница по-прежнему занимает до 40 Кбайт.
 
 Денормализация ограничена следующими копиями:
 
@@ -1369,19 +1380,21 @@ CHECK (cover_letter IS NULL OR octet_length(cover_letter) <= 10000);
 - Справочники целиком копируются в память приложения; изменение версии обновляет всю копию.
 - Метаданные S3 содержат ключи и размеры; байты изображений не добавляются в 100 Кбайт профиля и 50 Кбайт компании.
 
-Популярная вакансия создаёт горячий ключ чтения, но не единый счётчик записи на каждый отклик. Хеш по соискателю распределяет отклики крупной компании между группами. Неравномерность проверяется сценарием с популярными компаниями и вакансиями, а не только случайными ID. При росте ёмкости бакеты переносятся в новую HA-группу через копирование и догоняющую репликацию, короткое запрещение записи бакета и атомарное переключение карты. Смена количества физических групп не требует пересчитать хеш всех пользователей.
+Популярная вакансия создаёт горячий ключ чтения, но не единый счётчик записи на каждый отклик. Нагрузка крупных компаний и массовые отклики проверяются отдельно от равномерных обращений. Для текущего горизонта данных выбирается достаточная ёмкость узлов каждой группы. Если пределы CPU, IOPS или восстановления не проходят испытания, увеличиваются ресурсы узла; шардирование потребует отдельного пересмотра схемы и не заложено в текущую конфигурацию.
 
 ### 6.5. Транзакции, консистентность и резервирование PostgreSQL
 
-Регистрация, профиль, создание компании и членства находятся в PG-Core и при необходимости создаются одной транзакцией. Пароль проверяется по `users` только при входе; после успеха создаётся отдельная сессия Redis. Если Redis недоступен, учётная запись может быть создана, но успешный вход не подтверждается. Проверки актуальных прав компании и критические бизнес-чтения выполняются через PostgreSQL primary; роль из сессии их не заменяет.
+Локальная транзакция ограничена одной целевой БД. Регистрация по email и паролю создаёт учётную запись и квитанцию результата одной транзакцией `auth_db`. После успешного создания аккаунта пользователь может получить сессию. Информация о себе сохраняется отдельным действием в `profiles_db`, запись профиля создаётся при первом сохранении. Данные компании и членство оформляются через соответствующие сервисы при работе с компанией.
 
-При отправке отклика сервис сначала проверяет актуальные права, владельца/публикацию резюме и доступность вакансии через их primary. Время и версии проверки сохраняются в отклике; транзакция целевого шарда создаёт отклик, письмо и квитанцию операции. Как и в логической модели, последующее закрытие вакансии не отменяет принятую операцию. Глобальной транзакции трёх групп и межшардовых FK нет; этот контракт не обещает сериализацию закрытия вакансии и создания отклика одним общим commit. Удаление резюме/вакансии сначала логическое; фоновые удаления не разрывают сохраняемые связи.
+Проверка пароля читает `users` через сервис авторизации. После входа создаётся сессия Redis. Актуальное членство в компании проверяет сервис прав по primary `members_db`. Отдельные БД Core используют общий primary HA-группы, но собственные соединения и локальные транзакции.
 
-**Идемпотентность между группами.** Один ключ `(actor_key,route,client_key)` резервируется в PG-Core с неизменяемыми `operation_id`, целевой группой/бакетом и хешем запроса. В целевой группе бизнес-изменение и `operation_receipts` фиксируются одной транзакцией. Затем Core помечает результат завершённым. Если процесс упал между двумя подтверждениями, повтор обращается к квитанции с прежним `operation_id` и восстанавливает ответ. До первого бизнес-изменения вставляется квитанция с заранее выбранными кодом и ID результата; при конфликте PK исполнитель читает сохранённый исход и не меняет бизнес-данные. Квитанция становится видимой только вместе с commit изменения; при ошибке всё откатывается. Так повтор не превращает уже созданный отклик в новый конфликт активной пары. Полная последовательность, сроки и восстановление после сбоя описаны в разделе 7.1.
+Перед отправкой отклика сервис проверяет владельца и публикацию резюме через сервис резюме, доступность вакансии через сервис вакансий. Время и версии проверки сохраняются в отклике. Отклик, письмо и квитанция фиксируются одной транзакцией `applications_db`. Последующее закрытие вакансии сохраняет ранее принятый отклик. Удаление исходных сущностей сначала логическое, физическая очистка учитывает межбазовые ссылки.
 
-Просроченная lease разрешает повторить проверку результата, а не создать другую операцию. Pending-ключи не удаляются по TTL до выяснения исхода. Квитанции живут минимум 48 часов, больше 24-часового окна ключа; очистка дополнительно проверяет, что глобальная операция завершена и больше не может быть исполнена повторно. При недоступности Core очистка откладывается. Бюджет штатных 48 часов: `(8 + 3 + 35 + 21) × 172 800 = 11 577 600` строк по 256 байт, **2,964 Гбайт** без индексов; создание и очистка — до **134 QPS** дополнительно. Длительная авария требует дополнительной ёмкости, а не удаления незавершённых операций. Регистрация выполняется целиком в Core и отдельной квитанции целевого шарда не требует. Эта добавка учтена в дисковой ёмкости ниже.
+**Идемпотентность между целевыми БД.** Координатор хранит ключ `(actor_key,route,client_key)`, хеш команды, `operation_id` и неизменяемую `target_database` в `idempotency_db`. Целевая БД сохраняет результат команды в локальной квитанции совместно с бизнес-записью. Координатор затем завершает глобальный ключ. Повтор восстанавливает исход по квитанции. Общий механизм описан в 7.1 и применяется также к созданию аккаунта.
 
-**Репликация и failover.** В каждой из восьми групп по узлу в Москве, Казани и Новосибирске. Начальное размещение primary: Core и две группы откликов — Москва; Catalogue, одна группа резюме и одна откликов — Казань; оставшиеся группы резюме и откликов — Новосибирск. Размещение primary не задаёт пропорции пользовательского трафика 34/33/33.
+Окно ключа — 24 часа, квитанции удерживаются минимум 48 часов. Незавершённые ключи сохраняются до выяснения исхода. Очистка квитанций через API координатора проверяет завершение операции, при недоступности откладывается. Бюджет всех 69 команд/с, включая 2 регистрации/с, составляет `69 × 172 800 = 11 923 200` квитанций по 256 байт, **3,052 Гбайт**. Вставка и очистка дают **138 логических изменений/с**. Из них Core обслуживает 4 изменения квитанций создания аккаунта/с.
+
+**Репликация и failover.** В каждой из четырёх групп по узлу в Москве, Казани и Новосибирске. Начальное размещение primary: Core — Москва, Catalogue — Казань, Resume и Applications — Новосибирск. Ресурсы каждого узла резервируются под полную нагрузку своей группы после повышения standby. Размещение primary не задаёт пропорции пользовательского трафика 34/33/33.
 
 ```yaml
 # Политика Patroni каждой HA-группы, не полный конфигурационный файл
@@ -1397,17 +1410,21 @@ postgresql:
 
 Для всех PG-групп используется общий **etcd из трёх голосующих узлов, по одному в ДЦ**, с разными namespace Patroni. Это отдельный межрегиональный кворум 2/3; три независимых локальных Consul из раздела 4 его не заменяют. Watchdog/fencing останавливает старый primary при потере права лидерства. Сетевая изоляция не должна создавать два принимающих запись primary. После потери двух ДЦ строгая запись не гарантируется.
 
-Публичные карточки вакансии и краткие сведения компании допускают чтение с локального standby при измеренном отставании не более 2 секунд; при большем лаге запрос идёт к primary. Чтения владельца после изменения, проверки доступности вакансии перед откликом, членство и отклики идут на PostgreSQL primary. `synchronous_commit=on` означает сохранение WAL на standby, но не обязательное завершение replay, поэтому один лишь факт синхронной репликации не гарантирует read-your-writes при случайном чтении с реплики.
+Сервисы вакансий и компаний могут читать публичные карточки с локального standby своей группы при измеренном lag до 2 секунд. При большем lag выбирается primary. Чтения владельца после изменения, проверка вакансии перед откликом, членство и отклики используют primary своей БД. Сохранение WAL на standby предшествует его replay, поэтому актуальность чтения контролируется отдельно.
 
-TTL PostgreSQL реализован индексируемыми фоновыми пакетами с ограничением скорости, а не встроенным автоматическим удалением по времени. Очистка служебных SQL-ключей включена в QPS раздела 5; сессии удаляются TTL Redis. После достижения пятилетнего горизонта добавляется фоновая очистка старых откликов: до 100 строк за пакет раз в 5 секунд на группу, с паузами при росте WAL/lag. Это до 80 строк/с по системе, отдельно от пользовательских 56 QPS записи; строки письма не сканируются. VACUUM, TTL, резервное копирование и восстановление реплик участвуют в нагрузочных испытаниях.
+TTL PostgreSQL реализован индексируемыми фоновыми пакетами с ограничением скорости, а не встроенным автоматическим удалением по времени. Очистка служебных SQL-ключей включена в QPS раздела 5; сессии удаляются TTL Redis. После достижения пятилетнего горизонта добавляется фоновая очистка старых откликов: до 400 строк за пакет раз в 5 секунд в PG-Applications, с паузами при росте WAL/lag. Это до 80 строк/с по системе, отдельно от пользовательских 56 QPS записи; строки письма не сканируются. VACUUM, TTL, резервное копирование и восстановление реплик участвуют в нагрузочных испытаниях.
 
 ### 6.6. Поиск, брокер, кеши, файлы и журналы
 
-**Elasticsearch.** Один кластер: шесть data-узлов, по два на ДЦ, и три отдельных master-eligible узла, по одному на ДЦ. Четыре primary shard распределяют документы по `_id`; у каждого две replica. Настраиваются awareness и forced awareness по атрибуту `dc`, чтобы копии находились в трёх разных ДЦ [[26]](#source26). После отказа ДЦ доступны две копии каждого шарда, а третья остаётся unassigned до восстановления площадки; это ожидаемый yellow, не потеря поисковых документов.
+**Elasticsearch.** Три узла, по одному в Москве, Казани и Новосибирске. Каждый хранит весь индекс вакансий. Основная копия принимает изменения от индексатора и обслуживает поиск, две полные replica получают изменения и также обслуживают поиск. Клиент использует адреса трёх узлов, кластер направляет изменение к основной копии и выбирает доступную копию для поиска по задержке и очереди [[50]](#source50).
 
-Индексатор читает актуальную вакансию и компанию из PostgreSQL, использует Bulk API и версию источника (`external_gte`) [[36]](#source36); устаревшая версия не перезаписывает новую. Закрытая вакансия получает документ-tombstone со статусом `closed` и последней версией на окно возможного повтора, затем удаляется. Поисковый alias фильтрует `status=published`, запрос также фильтрует `expires_at > now`. Это предотвращает повторное появление закрытой вакансии из запоздавшего события. Компания в MVP создаётся при регистрации; при добавлении массового редактирования `company_brief` потребуется отдельный поток переиндексации затронутых вакансий.
+Все три узла совмещают хранение данных и участие в выборах управляющего узла, для большинства нужны два из трёх [[49]](#source49). При отказе узла с основной копией одна из replica повышается. Awareness и forced awareness по атрибуту `dc` обеспечивают размещение полных копий в разных ДЦ [[26]](#source26). После потери площадки работают две копии, третья ожидает восстановления площадки, состояние индекса — yellow.
 
-Целевой refresh — 30 секунд, индексатор набирает до 100 документов либо ждёт до 5 секунд; это укладывается в ранее выбранное ограничение «не реже раза в минуту». Два индексатора одной consumer group ограничены 25 попытками обработки/с каждый, включая повторы; суммарный предел — 50 событий/с; параметры захвата и подтверждений описаны в разделе 7.2. В штатном режиме оставшееся окно до 10 минут покрывает очередь и восстановление после краткого отставания. Производительность обработчика проверяется на 50 событиях/с против штатных 5. Один запрос поиска выполняет query-фазу на четырёх шардах, плюс fetch и координацию: 1 795 запросов/с — как минимум 7 180 shard-query операций/с. Для теста принят двойной поток 3 590 поисков/с; после потери ДЦ четыре data-узла должны совместно его обслуживать. Производительность определяется смесью фильтров и шириной запросов, а не только размером индекса [[27]](#source27).
+Индексатор читает актуальную вакансию из своей `vacancies_db`, краткую компанию получает через API сервиса компаний. Bulk API использует версию источника `external_gte` [[36]](#source36). Закрытая вакансия получает документ-tombstone со статусом `closed` и последней версией на окно повтора. Поисковый alias фильтрует `status=published`, запрос учитывает `expires_at > now`. Редактирование компании с обновлением всех её вакансий потребует дополнительного потока переиндексации.
+
+Целевой refresh — 30 секунд. Индексатор набирает до 100 документов либо ждёт до 5 секунд. Два индексатора одной consumer group ограничены 25 попытками обработки/с каждый, суммарно до 50 событий/с против штатных 5. Параметры доставки приведены в 7.2. Окно до 10 минут учитывает очередь и краткое отставание.
+
+Один поиск выполняется выбранной копией всего индекса. При равномерном распределении 1 795 поисков/с дают около `ceil(1 795 / 3) = 599` запросов/с на узел. После потери ДЦ два оставшихся узла принимают около `ceil(1 795 / 2) = 898` запросов/с каждый. Испытание выполняется на двойном потоке 3 590 поисков/с после потери ДЦ, ориентировочно по 1 795 на оставшийся узел. Фактическое распределение зависит от задержек и занятости копий. В испытании используются полнотекстовые запросы, фильтры и сортировка, измеряются CPU, дисковые чтения и файловый кеш [[27]](#source27).
 
 **Kafka и outbox.** Три брокера с rack-awareness по ДЦ, три отдельных KRaft controller, по одному на ДЦ. Оба топика имеют RF=3, `min.insync.replicas=2`, producer `acks=all`, `enable.idempotence=true`, `unclean.leader.election.enable=false` [[28]](#source28). При одном отказе остаются два ISR; новые записи могут кратко ждать перевыборов. Producer idempotence не отменяет повторов outbox после перезапуска, поэтому используются event ID, версии и квитанции.
 
@@ -1415,27 +1432,27 @@ Kafka retention — **24 часа для событий и 15 минут для 
 
 Логи передаются пакетами; 7 028 событий/с — не 7 028 отдельных TCP-соединений или обязательных INSERT. Потребитель логов подтверждает offset после успешной записи пакета ClickHouse. Допустимы повторы и ограниченная потеря логов при переполнении/слишком долгом простое; письма, резюме, cookies и токены в поток не попадают.
 
-**Серверные сессии: cookie и общий Redis Cluster.** При входе генерируется криптографически случайный session ID из 32 байт. Браузер получает только ID в cookie `__Host-session` с `Secure; HttpOnly; SameSite=Lax; Path=/`, без Domain. Redis хранит запись по SHA-256 этого ID: пользователя, CSRF-токен, метку устройства, время создания и абсолютного окончания. Дедлайн неактивности представлен TTL самого ключа; это не отдельное устаревающее поле внутри String. Idle TTL — 30 суток, абсолютный срок — 90 суток. ID заменяется после успешного входа, принятый до входа ID не переиспользуется [[17]](#source17).
+**Серверные сессии в общем Redis.** При входе генерируется случайный session ID из 32 байт. Браузер получает его в cookie `__Host-session` с атрибутами Secure, HttpOnly, SameSite=Lax и Path=/. Redis хранит по SHA-256 этого ID пользователя, CSRF-токен, устройство, время создания и абсолютного окончания. Дедлайн неактивности задаётся TTL ключа. Idle TTL — 30 суток, абсолютный срок — 90 суток. При входе создаётся новый ID [[17]](#source17).
 
 CSRF-токен создаётся вместе с сессией и передаётся приложению в теле ответа входа/получения текущей сессии. При изменяющих запросах приложение отправляет его в `X-CSRF-Token`; сервер сравнивает токены и проверяет Origin. Проверка не сводится к автоматической отправке cookie; SameSite — дополнительный механизм [[37]](#source37). Создание произвольных бизнес-записей через GET не допускается.
 
 Middleware один раз вызывает короткий Lua-скрипт: получить сессию, проверить абсолютный срок и для разрешённого запроса продлить TTL до `min(now + 30 суток, absolute_expires_at)`. Скрипт не выполняет SET отсутствующего ключа. Поэтому обычное продление не восстанавливает удалённую сессию. Это логика атомарного чтения с изменением TTL, аналогичная GETEX, но с проверкой абсолютного дедлайна [[39]](#source39). При выходе выполняется DEL и очищается cookie; локального положительного кеша авторизации нет. Отдельный HTTP-запрос продления перед каждым API не нужен.
 
-Кластер сессий общий для трёх ДЦ: **3 primary + по 2 replica = 9 Redis-узлов**. Слоты 0–5460, 5461–10921, 10922–16383 первоначально распределены между тремя primary. Хеш случайного session ID распределяет ключи без привязки к региону. В каждом ДЦ находятся primary одного шарда и replica двух остальных; копии одного шарда размещены в разных ДЦ и на разных хостах. После потери площадки два оставшихся primary дают большинство для перевыборов, replica потерянного primary повышается [[38]](#source38). Клиент получает несколько bootstrap-адресов, обновляет карту слотов и обращается только к primary (`ReadOnly=false`); sticky sessions на backend или ДЦ не требуются.
+Общий Redis сессий содержит **один primary и две полные replica**, по одному узлу в каждом ДЦ. Каждый узел хранит весь набор сессий. Проверка с продлением TTL, создание и удаление выполняются на primary. Три Sentinel с именем группы `sessions`, по одному на ДЦ, контролируют доступность, для признания отказа настроен quorum 2. После отказа primary большинство Sentinel согласует повышение подходящей replica. Клиент получает адрес текущего primary через Sentinel [[38]](#source38).
 
-На каждом узле сессий — 8 CPU, 64 Гбайт RAM, 128 Гбайт SSD для AOF, `maxmemory=28gb`, `maxmemory-policy=noeviction`, `appendonly=yes`, `appendfsync=everysec`; `min-replicas-to-write=1`, `min-replicas-max-lag=2`. Ограничение реплик уменьшает риск записи в изолированный узел, но не превращает Redis Cluster в хранилище со строгой консистентностью. AOF ускоряет перезапуск, не заменяет бизнес-backup [[40]](#source40). При переполнении возвращается ошибка создания/изменения, действующие сессии не вытесняются ради свободной RAM.
+Предварительная конфигурация каждого узла сессий — 8 CPU, **256 Гбайт RAM и 512 Гбайт SSD для AOF**. Параметры памяти и персистентности задаются как `maxmemory=96gb`, `maxmemory-policy=noeviction`, `appendonly=yes`, `appendfsync=everysec`. Применяются `min-replicas-to-write=1` и `min-replicas-max-lag=2`. При потере обеих доступных replica запись ограничивается. Переполнение памяти возвращает ошибку изменения. AOF используется для перезапуска текущего экземпляра [[40]](#source40).
 
-Репликация Redis асинхронная: при failover могут потеряться последние создания, продления **и удаления** сессий [[29]](#source29). Поэтому RPO 0 и мгновенный отзыв при сетевом разделении для сессий не заявляются. Возможен повторный вход, а недавно удалённая запись может вновь оказаться на повышенной replica. Это явное ограничение выбранного механизма, не гарантия строгого отзыва. После восстановления из старого снимка/AOF аварийного контура меняется общий namespace и старые cookie не принимаются. При недоступности шарда защищённый запрос получает ошибку зависимости, а отсутствие действующей сессии — 401; сбой Redis не подменяется успешной проверкой авторизации. Цель восстановления доступности после одного отказа ДЦ — до 60 секунд с проверкой этих сценариев. Права компании и целостность откликов по-прежнему обеспечиваются PostgreSQL.
+Репликация сессий асинхронная. При переключении возможна потеря последних созданий, продлений и удалений [[29]](#source29). Недавно удалённая сессия может сохраниться на повышенной replica. После восстановления из старого снимка аварийного контура меняется общий namespace. При недоступности primary защищённый запрос получает ошибку зависимости, отсутствие сессии даёт 401. Цель восстановления после потери одного ДЦ — до 60 секунд с проверкой повторов и переподключения клиента. Актуальные права и целостность бизнес-записей обеспечивает PostgreSQL.
 
-Общий Redis означает, что запрос из одного ДЦ может читать primary в другом: добавляется WAN RTT. На каждый внутренний вызов сессия повторно не запрашивается; проверенный контекст передаётся по доверенному межсервисному каналу. В нагрузочном тесте измеряются задержки чтения/продления, репликация TTL, сбои шарда и AOF rewrite; скорость Redis на localhost не считается доказательством задержки такой схемы.
+Primary может находиться в другом ДЦ, поэтому проверка сессии включает WAN RTT. Один внешний API-запрос выполняет одну проверку, внутренним сервисам передаётся проверенный контекст. В испытании измеряются задержки Lua-проверки с продлением, репликация TTL, переключение primary и AOF rewrite при рабочей нагрузке.
 
-**Локальные лимиты и справочники.** В каждом ДЦ по-прежнему независимая пара Redis primary/replica и три Sentinel на разных хостах. Она не содержит сессий и не расходует их память. Lua атомарно увеличивает счётчик и выставляет TTL; чтение replica для решения о лимите не используется. Потеря последних изменений при переключении допустима для минутных защитных лимитов. При недоступности этой пары включаются консервативные локальные лимиты NGINX/приложения. Глобальная точная квота между ДЦ не обещается. Справочник занимает около 2,56 Мбайт на процесс и загружается целой версией из Core.
+**Локальные лимиты и справочники.** В каждом ДЦ работает независимая пара Redis primary/replica и три Sentinel. Lua атомарно увеличивает счётчик и выставляет TTL. Потеря последних изменений при переключении допустима для минутных лимитов. При недоступности пары включаются локальные лимиты NGINX/приложения. Справочник занимает около 2,56 Мбайт на процесс и загружается целой версией через сервис справочников из `dictionaries_db`.
 
 **ClickHouse.** Один логический шард, три реплики ReplicatedMergeTree в разных ДЦ и три Keeper, по одному на ДЦ [[30]](#source30). Строки за день находятся в отдельной партиции, ключ сортировки — маршрут, время, ID события. Пакеты примерно по 1 000 строк дают около 7 INSERT/с при 7 028 событиях/с. Вставка подтверждается при `insert_quorum=2`; клиент перенаправляет запись на здоровую реплику после обнаружения отказа. Один запрос чтения выбирает одну доступную реплику, а не суммирует одни и те же строки со всех трёх. TTL семь дней исполняется во время фонового обслуживания, поэтому предусмотрен дополнительный день ёмкости. Логи не используются для подтверждения бизнес-операций.
 
 **S3-совместимые файлы.** Выбран Ceph RGW: три OSD-хоста, по одному в каждом ДЦ, на каждом два NVMe по 1,92 Тбайт; два RGW на ДЦ, три MON, по одному в ДЦ, и два MGR на разных площадках. Пул replicated: `size=3, min_size=2`, CRUSH failure domain `datacenter` [[31]](#source31), [[32]](#source32). Это один кластер с копиями в трёх ДЦ, а не асинхронная multisite-репликация независимых S3. При потере площадки две оставшиеся копии продолжают обслуживать данные; при потере двух запись останавливается. Межрегиональные RTT влияют на запись и восстановление, поэтому эта схема допустима только после проверки реальных каналов.
 
-Основной файл и миниатюра загружаются и проверяются до публикации `file_metadata` и ссылки в профиле/компании одной транзакцией Core. Ключи неизменяемые, повтор загрузки с тем же `file_id` и checksum не создаёт другой результат. Оригинал после преобразования не хранится. Незавершённые multipart-загрузки и объекты без подтверждённых метаданных удаляются после сверки и защитного интервала 24 часа. Замена аватарки не переиспользует старый URL; прежний объект удаляется после завершения обращений и TTL CDN.
+Основной файл и миниатюра загружаются и проверяются, затем сервис файлов фиксирует `file_metadata` в `files_db`. Сервис профилей или компаний проверяет владельца файла через API и отдельной транзакцией публикует ссылку в своей БД. Повтор использует тот же `file_id` и checksum, после сбоя сверяет фактическую ссылку. Ключи объектов версионируются. Multipart-загрузки и объекты без подтверждённых метаданных очищаются после 24 часов и проверки завершения операции. Объекты с метаданными сохраняются до подтверждённого результата привязки или явного отвязывания владельцем. Старый вариант после замены удаляется по завершении обращений и TTL CDN.
 
 Внутренний доступ к S3 — только у приложения и CDN с ограниченными полномочиями. Лимит входного файла 2 Мбайт и 4 млн пикселей, проверка формата и повторное кодирование ограничивают временную память: например, 8 одновременных преобразований × (2 Мбайт входа + 16 Мбайт пикселей) ≈ 144 Мбайт на обработчик. Это рабочий буфер, а не постоянное хранилище.
 
@@ -1443,18 +1460,20 @@ Middleware один раз вызывает короткий Lua-скрипт: �
 
 #### PostgreSQL: данные с физическим запасом
 
-В объём включены метаданные изображений из расчёта ниже и локальные квитанции операций; репликация ещё не умножена на три. Конфигурация одного PG-узла — предварительно 16 CPU, 128 Гбайт RAM, NVMe и 25 GbE. У Core полезный диск 15,36 Тбайт, у остальных 7,68 Тбайт; например, RAID10 из четырёх NVMe по 7,68 или 3,84 Тбайт соответственно. RAID защищает локальный диск и не заменяет реплики.
+В объём включены метаданные изображений из расчёта ниже и локальные квитанции операций; репликация ещё не умножена на три. Конфигурация одного PG-узла — предварительно 16 CPU, 128 Гбайт RAM, NVMe и 25 GbE. Для каждой группы используется один расчёт: **`V_физ = V_лог × 1,3`**, **`D_min = V_физ / 0,7`**. Требуемая полезная ёмкость тома округляется вверх до целого Тбайт. Это ёмкость, доступная PostgreSQL после RAID и форматирования; она может обеспечиваться массивом нескольких дисков. RAID защищает локальный диск и не заменяет реплики.
 
-| Группа | Число HA-групп | Физический объём на узел, Тбайт | Полезный диск на узел, Тбайт | Занято | Обоснование |
-|---|---:|---:|---:|---:|---|
-| PG-Core | 1 | 7,991 | 15,36 | 52,0% | Профили велики, но читается небольшая активная часть; email и права остаются в одной БД |
-| PG-Catalogue | 1 | 3,129 | 7,68 | 40,7% | История вакансий помещается на одном узле; чтения распределяются на доступные копии |
-| PG-Resume | 2 | 5,174 | 7,68 | 67,4% | Одна группа потребовала бы более 10 Тбайт; две укладываются в 70% дискового бюджета |
-| PG-Applications | 4 | 4,047 | 7,68 | 52,7% | Три группы превысили бы принятый 70%-й порог; четыре оставляют запас роста и обслуживания |
+| Группа | Число HA-групп | Логический объём, Тбайт | Физический объём на узел, Тбайт | Минимальная ёмкость на узел, Тбайт | Выделяемая полезная ёмкость на узел, Тбайт | Занято |
+|---|---:|---:|---:|---:|---:|---:|
+| PG-Core | 1 | 6,147 | 7,991 | 11,417 | 12 | 66,6% |
+| PG-Catalogue | 1 | 2,407 | 3,129 | 4,471 | 5 | 62,6% |
+| PG-Resume | 1 | 7,960 | 10,348 | 14,784 | 15 | 69,0% |
+| PG-Applications | 1 | 12,451 | 16,186 | 23,124 | 24 | 67,4% |
 
-Всего — **37,655 Тбайт одной физической копии PostgreSQL**, около **112,966 Тбайт трёх копий**, 24 экземпляра. Свободный диск под WAL контролируется отдельно; длительное удержание WAL replication slot не может бесконечно расходовать резерв. Порог предупреждения по заполнению — 65%, расширение начинается до 70%; поэтому группы резюме требуют раннего планирования следующего расширения.
+Минимальная ёмкость в таблице округлена вверх до 0,001 Тбайт; все расчёты выполняются до округления исходных объёмов. Например, для PG-Applications: `12,4509646858 × 1,3 / 0,7 ≈ 23,1232 Тбайт`, поэтому выделяется 24 Тбайт каждому из трёх узлов группы.
 
-Принятые размеры индексов нужно проверить на реальных строках через `pg_total_relation_size`, статистику TOAST и рост после UPDATE/VACUUM. Множитель 1,3 не является результатом измерения. При превышении бюджета увеличивается диск или число физических групп с переносом логических бакетов; не уменьшается число копий.
+Всего — **37,655 Тбайт одной физической копии PostgreSQL**, около **112,966 Тбайт трёх копий**, **12 экземпляров**. Выделяемая полезная ёмкость всех томов — `(12 + 5 + 15 + 24) × 3 = 168 Тбайт`; это не сырая ёмкость дисков до RAID. Таблица описывает накопление за пять лет. Заполнение и удержание WAL контролируются, расширение планируется до достижения 70%; replication slot не может бесконечно расходовать свободный резерв.
+
+Принятые размеры индексов нужно проверить на реальных строках через `pg_total_relation_size`, статистику TOAST и рост после UPDATE/VACUUM. Множитель 1,3 не является результатом измерения. При превышении бюджета увеличивается полезная ёмкость узлов группы; число копий не уменьшается. Достаточность CPU, IOPS и времени восстановления проверяется отдельно от ёмкости диска.
 
 #### Аватарки и логотипы: дополнение к прежней модели
 
@@ -1476,36 +1495,40 @@ Middleware один раз вызывает короткий Lua-скрипт: �
 
 #### Память и нагрузка сессий Redis
 
-Логические 66 млн записей × 512 байт = 33,792 Гбайт из раздела 5 теперь относятся к Redis. Множитель **2** на ключи, метаданные и allocator — предварительный бюджет: `33,792 × 2 / 3 = 22,528 Гбайт` на узел шарда. Это меньше `maxmemory=28gb`; оставшаяся RAM узла нужна для репликационных буферов, фрагментации и copy-on-write при AOF rewrite. Три полные копии требуют около **202,752 Гбайт RAM по девяти узлам**; выделено 576 Гбайт суммарно. Предел 28gb соответствует примерно 30,065 Гбайт: даже удвоение этой памяти при rewrite оставляет около 3,9 Гбайт из 64 на прочие расходы. При росте RSS и буферов расширение начинается раньше; реально доступный запас проверяется под AOF rewrite. Размер записи проверяется через MEMORY USAGE, used_memory и RSS на заполненной базе.
+Логический объём равен `66 млн × 512 байт = 33,792 Гбайт`. С предварительным множителем 2 на ключи, метаданные и allocator весь набор занимает **67,584 Гбайт на каждом узле**. Три полные копии требуют **202,752 Гбайт RAM для данных**, выделено `3 × 256 = 768 Гбайт RAM` суммарно.
 
-Вся система создаёт до **7 028 чтений/с и 7 784 логических изменений/с сессий**. В среднем на primary приходится 2 343 чтения и 2 595 изменений/с; логические изменения включают TTL, не только отдельные клиентские команды. Верхняя цель двух ДЦ по 4 600 RPS — 9 200 проверок сессии/с всему кластеру. Для испытания каждого primary принят предел **10 000 Lua-проверок с продлением в секунду плюс 500 созданий/удалений**, при репликации и AOF; это также покрывает двойной системный поток с неравномерностью. Предел — цель теста, не измеренный результат.
+Лимит `maxmemory=96gb` соответствует 103,079 Гбайт. При двукратном бюджете памяти на copy-on-write во время AOF rewrite получается `2 × 103,079 ≈ 206,158 Гбайт`, около 49,842 Гбайт из 256 остаётся для ОС, буферов и прочих расходов. Это предварительная оценка. На заполненной базе проверяются MEMORY USAGE, used_memory, RSS, буферы репликации и пиковый расход AOF rewrite. Для AOF выделено 512 Гбайт SSD на узел с контролем размера файлов и свободного места во время rewrite.
 
-Потеря одного ДЦ не переносит все ключи на один процесс: сохраняются три логических шарда с новыми владельцами, хотя в одном оставшемся ДЦ будет два primary. Нагрузка и память резервируются на каждый Redis-узел, включая исходные replica. Внеплановый вход после аварии ограничивается rate limiting, чтобы реконнекты и проверка паролей не перегрузили PostgreSQL.
+Один primary обслуживает весь поток **7 028 проверок/с и 7 784 логических изменений/с**. Проверка и продление TTL выполняются одним Lua-вызовом. Цель двух ДЦ по 4 600 API RPS даёт 9 200 проверок/с. Испытательная цель primary — **20 000 Lua-проверок с продлением/с и 1 000 созданий/удалений/с** при двух replica и AOF. Она выбрана выше двойного исходного потока `2 × 7 028 = 14 056` проверок/с и `2 × 378 = 756` операций управления сессиями/с.
+
+Каждая replica рассчитана на повышение и полный поток primary. При потере ДЦ полная копия данных уже находится на оставшихся узлах. Испытание включает переключение через Sentinel, обновление подключения клиента и нагрузку во время восстановления копии. Повторные входы ограничиваются rate limiting.
 
 #### Остальные хранилища
 
 | Хранилище | Оценка физических данных и узлы | Численный предел для испытания |
 |---|---|---|
-| Elasticsearch | `31,135 Гбайт × 2` на индекс/служебные данные = 62,269 Гбайт одной копии; 15,567 Гбайт на primary shard; три копии 186,808 Гбайт. 6 data-узлов по 16 CPU, 64 Гбайт RAM, 1 Тбайт SSD; 3 отдельных master по 2 CPU / 4 Гбайт | 3 590 поисков/с всем кластером после потери ДЦ; минимум 3 590 query-задач/с на оставшийся data-узел, плюс fetch/координация |
+| Elasticsearch | `31,135 Гбайт × 2 = 62,269 Гбайт` полного индекса на узел, три копии — 186,808 Гбайт. Три узла по 16 CPU, 64 Гбайт RAM и 1 Тбайт SSD, каждый хранит данные и участвует в управлении кластером. RAM используется для heap и файлового кеша горячих страниц | 3 590 поисков/с всем кластером после потери ДЦ, ориентировочно по 1 795 на каждый из двух оставшихся узлов, с индексацией и координацией |
 | Redis лимитов | При 4 600 RPS ДЦ: 552 тыс. ключей × 128 байт × 4 на overhead = 282,624 Мбайт; узлы по 4 CPU / 4 Гбайт RAM, `maxmemory=1gb`, политика `noeviction` | До 18 400 логических изменений/с с TTL; тест минимум 30 тыс. команд/с на primary с горячими IP |
 | Kafka | `(0,442 + 3,239) × 1,5 = 5,521 Гбайт` одной копии с сегментами/индексами; RF=3 → 16,564 Гбайт. 3 брокера по 8 CPU / 32 Гбайт / 1 Тбайт SSD; 3 controller по 2 CPU / 4 Гбайт | 14 056 записей логов/с, не отдельных produce-запросов, плюс события и репликация; без backlog дольше retention |
 | ClickHouse | `453,090 × 1,3 × 8/7 = 673,162 Гбайт` на реплику; около 2,019 Тбайт трёх копий, без скидки на компрессию. 3 узла по 8 CPU / 32 Гбайт / 2 Тбайт SSD; 3 Keeper | Не менее 20 тыс. строк/с при пакетах около 1 000 строк и 20 диагностических запросах/с после отказа ДЦ |
 | Ceph RGW / S3 | 3 OSD-хоста по 8 CPU / 64 Гбайт / 3,84 Тбайт NVMe; отдельно RGW/MON/MGR; 1,3337 Тбайт данных × 3 копии до накладных расходов | 12 тыс. GET/с и 20 изменяющих операций/с всем кластером после потери ДЦ, включая холодный CDN; смешанные размеры 20/80/100 Кбайт |
 
-Kafka и PostgreSQL обслуживают глобальный поток через шарды/лидеров, поэтому нельзя просто умножить каждую их таблицу на 34/33/33%. Эти веса относятся к входящему API. Redis лимитов локален — его предел рассчитан на полные 4 600 RPS ДЦ. Redis сессий общий — он рассчитан на суммарный поток всех ДЦ. Цель 3 590 поисков/с покрывает два ДЦ по 4 600 RPS с прежней долей поиска: `1 795 × (2 × 4 600 / 7 028) ≈ 2 350`. Двойной системный пик для теста оставляет дополнительный запас.
+Лидеры партиций Kafka и primary PostgreSQL обслуживают глобальный поток своих данных. Веса 34/33/33% относятся к входящему API. Redis лимитов рассчитан на 4 600 RPS локального ДЦ, общий Redis сессий — на поток всех ДЦ. Цель 3 590 поисков/с превышает поток двух ДЦ по 4 600 RPS с прежней долей поиска, `1 795 × (2 × 4 600 / 7 028) ≈ 2 350`. Двойной системный пик для поиска оставляет дополнительный запас.
 
 #### Проверка SQL QPS и принятие конфигурации
 
 | Группа | Исходная нагрузка всей группы / системы | Цель испытания |
 |---|---|---|
-| PG-Core | После переноса сессий: около 4 918 логических чтений/с и 214,2 изменений/с; загрузки изображений добавляют примерно одно чтение и три изменения/с | 12 000 чтений/с и 500 изменений/с одновременно, в том числе с меж-ДЦ commit |
+| PG-Core, сумма семи БД | База раздела 5 даёт около 4 918 чтений/с и 214,2 изменений/с. Проверка квитанций создания аккаунта добавляет до 2 чтений/с, вставка и очистка — 4 изменения/с, итого до 4 920 / 218,2. Загрузки изображений добавляют около одного чтения и трёх изменений/с | 12 000 чтений/с и 500 изменений/с одновременно суммарно для семи БД, с меж-ДЦ commit |
 | PG-Catalogue | 4 352 чтения вакансий/с, 5 изменений, outbox 5/25, квитанции 5/10; квитанции операций и фоновая очистка отдельно | 10 000 чтений/с и 500 изменений/с, включая догоняющую индексацию 50 событий/с |
-| PG-Resume, каждая из двух групп | В среднем 34 чтения/с и 4 изменения резюме/с, плюс локальные квитанции | 250 чтений/с и 50 изменений/с на группу, с полным телом резюме 100 Кбайт |
-| PG-Applications, каждая из четырёх групп | В среднем 205 SQL-чтений/с после fan-out и 14 изменений отклика/с, плюс квитанции и удаление истории | 1 000 чтений/с и 150 изменений/с на группу, включая фоновую очистку |
+| PG-Resume, одна группа | 68 чтений/с и 8 изменений резюме/с, плюс 16 изменений локальных квитанций/с с очисткой | 500 чтений/с и 100 изменений/с на группу, с полным телом резюме 100 Кбайт |
+| PG-Applications, одна группа | 535 SQL-чтений/с и 56 изменений отклика/с, плюс 112 изменений квитанций/с и до 80 удалений истории/с; всего до 248 изменений/с | 4 000 чтений/с и 600 изменений/с на группу, включая фоновую очистку |
 
 При консервативном пересчёте всего цикла на 50 событий/с outbox даёт до 250 логических изменений/с, квитанции индексатора — до 100, вакансии — 5, квитанции трёх пользовательских операций Catalogue с очисткой — 6. Сумма `250 + 100 + 5 + 6 = 361 < 500` укладывается в выбранную цель записи Catalogue до дополнительной аварийной очистки и повторов. Это верхняя оценка: при разгрузке очереди новые события продолжают поступать со скоростью 5/с, а не 50/с.
 
-Вакансии при полном чтении дают около `4 307 × 50 Кбайт ≈ 215 Мбайт/с` до протокольных расходов. Для тестовой цели Catalogue нужен порядок 500 Мбайт/с полезных ответов. Краткие поля компании выбираются SQL-проекцией, полные 50 Кбайт описания компании к каждой карточке не присоединяются. Накопленные профили/письма не должны целиком попадать в RAM: критичны индексы, активные страницы и фактическое распределение обращений.
+Вакансии при полном чтении дают около `4 307 × 50 Кбайт ≈ 215 Мбайт/с` до протокольных расходов. Для тестовой цели Catalogue нужен порядок 500 Мбайт/с полезных ответов. Краткие поля компании возвращает API сервиса компаний из `companies_db`. Индексатор получает их тем же путём. В расчётах QPS компании уже учтены чтения для карточек и индексации. Для RAM существенны индексы, активные страницы и распределение обращений.
+
+При двух регистрациях/с проверка квитанции даёт до 2 чтений/с, её создание и очистка — 4 изменения/с. Создание пользователя учтено в разделе 5. Объём квитанций добавлен к Core в таблице ёмкости, повторы проверяются в испытательном резерве.
 
 **Все пределы производительности в таблицах — критерии приёмки, а не опубликованные результаты тестов выбранных серверов.** Обоснована дисковая ёмкость и задана проверяемая нагрузка; подтвердить CPU, IOPS и задержки одним арифметическим расчётом нельзя. Перед эксплуатацией нужен нагрузочный тест на сопоставимом объёме данных со следующими условиями:
 
@@ -1523,9 +1546,9 @@ Kafka и PostgreSQL обслуживают глобальный поток че�
 
 | Направление | Клиент / интеграция | Выбор узла и ограничение |
 |---|---|---|
-| PostgreSQL | `pgx/v5` и ограниченный `pgxpool` | Карта бакетов → группа → PgBouncer; отдельные RW/RO endpoints, HAProxy проверяет роль через Patroni |
-| Elasticsearch | Официальный `go-elasticsearch` совместимого major | Несколько адресов healthy coordinating/data-узлов; локальные адреса предпочтительны, остальные ДЦ — fallback; Bulk у индексатора |
-| Redis сессий | `go-redis/v9`, `ClusterClient` | Карта слотов, несколько bootstrap-адресов, только primary; ограниченный пул до 32 активных подключений на узел с экземпляра приложения, Lua-проверка и TTL |
+| PostgreSQL | `pgx/v5` и ограниченный `pgxpool` | Имя своей целевой БД → HA-группа → PgBouncer, отдельные RW/RO endpoints, HAProxy проверяет роль через Patroni |
+| Elasticsearch | Официальный `go-elasticsearch` совместимого major | Адреса трёх узлов, поиск выполняет доступная копия, запись направляется к основной копии, Bulk у индексатора |
+| Redis сессий | `go-redis/v9`, `NewFailoverClient` | Три адреса Sentinel, `MasterName=sessions`, подключение к текущему primary, до 32 соединений на экземпляр приложения, Lua-проверка и TTL |
 | Redis лимитов | `go-redis/v9`, Sentinel client | Обнаружение текущего primary локальной пары, отдельный пул и полномочия, Lua для счётчика |
 | Kafka | `confluent-kafka-go` | Метаданные кластера и лидеров партиций через несколько bootstrap-адресов; bounded producer buffer, consumer groups |
 | ClickHouse | `clickhouse-go/v2`, native protocol | Пул адресов healthy реплик, ограниченные соединения, пакетная вставка с quorum |
@@ -1536,7 +1559,9 @@ Kafka и PostgreSQL обслуживают глобальный поток че�
 
 Официальные репозитории клиентов перечислены в источнике [[33]](#source33). RPC к другому сервису или S3 не выполняется внутри открытой SQL-транзакции: это удержало бы соединение во время сетевого ожидания.
 
-В каждом ДЦ два шлюза БД на разных хостах: PgBouncer в `transaction` mode и HAProxy, направляющий server-соединения к current primary группы; для допустимых чтений выделяется RO-маршрут к standby с контролем replay lag. После отказа primary старые соединения закрываются; новое соединение не должно попасть к бывшему лидеру. Приложение повторяет целую транзакцию с прежним ключом, а не отдельный произвольный SQL внутри частично выполненной операции.
+В каждом ДЦ два шлюза БД на разных хостах. PgBouncer работает в `transaction` mode, HAProxy направляет подключения к current primary группы или допустимому standby с контролем replay lag. Алиас PgBouncer задаёт конкретные database и service-role. При отказе primary закрываются старые соединения, повторяется целая транзакция с прежним ключом.
+
+Для каждого владельца создаётся роль с доступом только к своей БД. Общие права CONNECT для PUBLIC отзываются, выдаются адресные CONNECT и права на собственные таблицы. Учётные записи backup и миграций выделены отдельно. Сервисы обращаются к чужим данным через API владельца. Общая HA-группа сохраняет общие CPU, RAM, WAL и failover размещённых БД.
 
 Клиентский слой распределяет новые подключения между двумя локальными gateway по round-robin и исключает недоступный адрес; уже установленное подключение не переносится посреди транзакции. Общий лимит клиентского пула относится к обоим адресам вместе. Для RO-соединений HAProxy выбирает здоровые реплики по leastconn, а RW-пул содержит только текущий primary. При отказе gateway оставшийся принимает подключения в пределах общего серверного бюджета; бесконечные повторы и рост очередей запрещены.
 
@@ -1545,11 +1570,24 @@ PgBouncer возвращает серверное подключение в пу
 Бюджет подключений задаётся **суммарно по ролям и RW/RO-пулам**, а не независимо для каждого пользователя БД:
 
 - Каждая PG-группа, включая Core: до 32 + 4 с gateway, ещё 20 служебных: `6 × (32 + 4) + 20 = 236 < max_connections 256` на PG-экземпляр в худшем случае.
-- Приложение открывает небольшой пул, например 8 соединений к нужной группе на экземпляр; суммарное число клиентских соединений и длина очереди ограничиваются отдельно. Шесть gateway не создают неограниченную очередь.
+- Экземпляр сервиса открывает ограниченный клиентский пул к собственной БД. Для Core бюджет серверных соединений распределяется между семью БД, очереди и таймауты ограничены.
 
-Для соблюдения бюджета каждой PG-группы на gateway выделяются 24 обычных + 4 резервных RW-соединения и 8 RO-соединений; `max_db_connections` соответствующих алиасов ограничивает суммарное число по всем пользовательским пулам значениями 28 и 8. Создание нового алиаса/роли требует пересчёта общего бюджета, иначе один `default_pool_size` не ограничил бы все пулы вместе.
+Для Catalogue, Resume и Applications на gateway выделены 24 обычных + 4 резервных RW-соединения и 8 RO-соединений. В Core те же суммарные пределы распределены следующим образом.
 
-Оценка по закону Литтла после переноса сессий: при целевых 500 пишущих транзакциях/с и среднем времени удержания соединения 100 мс требуется около 50 одновременных подключений; чтения при 12 тыс./с и 2 мс добавляют около 24. Бюджет 192 обычных server-соединения Core даёт запас при этих временах. После отказа ДЦ доступны четыре gateway и 128 обычных соединений; это также больше расчётных 74. Если время удержания выше, уменьшается длительность транзакций/нагрузка или меняется конфигурация; `max_connections` не увеличивается бесконечно. Чтение сессий не занимает соединения PostgreSQL.
+| БД Core | Обычные RW | Резервные RW | RO |
+|---|---:|---:|---:|
+| `auth_db` | 4 | 1 | 1 |
+| `profiles_db` | 2 | 0 | 1 |
+| `companies_db` | 6 | 1 | 3 |
+| `members_db` | 4 | 0 | 1 |
+| `dictionaries_db` | 1 | 0 | 0 |
+| `files_db` | 1 | 0 | 1 |
+| `idempotency_db` | 6 | 2 | 1 |
+| **Сумма на gateway** | **24** | **4** | **8** |
+
+`max_db_connections` RW/RO-алиасов каждой БД ограничивается её долей бюджета по всем ролям, RO-алиас при нулевом лимите выключен. Предел всех БД одной группы на gateway составляет 36 server-соединений. Значения 236 и 256 относятся к PostgreSQL-экземпляру целиком. Новые роли и алиасы требуют пересчёта суммы. В Core дополнительно испытываются очереди каждого целевого пула и перераспределение долей в пределах общего бюджета.
+
+Оценка по закону Литтла после переноса сессий: при целевых 500 пишущих транзакциях/с и среднем времени удержания соединения 100 мс требуется около 50 одновременных подключений; чтения при 12 тыс./с и 2 мс добавляют около 24. Бюджет 192 обычных server-соединения Core даёт запас при этих временах. Для единой PG-Applications аналогичная оценка по цели испытания — `600 × 0,1 + 4 000 × 0,002 = 68` подключений. После отказа ДЦ доступны четыре gateway и 128 обычных соединений на группу; это больше расчётных 74 для Core и 68 для Applications. Если время удержания выше, уменьшается длительность транзакций/нагрузка или меняется конфигурация; `max_connections` не увеличивается бесконечно. Чтение сессий не занимает соединения PostgreSQL.
 
 ### 6.9. Резервное копирование и восстановление
 
@@ -1566,31 +1604,31 @@ PgBouncer возвращает серверное подключение в пу
 | Redis сессий | Две replica и AOF каждого узла для текущей работы; старые сессии не возвращаются из долгоживущих backup. После аварийного восстановления используется новый общий namespace | RPO 0 не заявляется; возможна потеря последних изменений, повторный вход. Failover до 60 с — цель теста |
 | Redis лимитов, reference_cache, CDN | Копируются конфигурация и версии, временные значения не архивируются; справочник восстанавливается из PostgreSQL, CDN — из S3 | Потеря краткоживущих лимитов/кешей допустима; требуется прогрев и защита источника |
 
-pgBackRest поддерживает полные/инкрементальные копии, WAL и восстановление на момент времени [[34]](#source34). Для каждой HA-группы используется отдельная stanza. Копирование по возможности читает здоровый standby, ограничивает скорость и не заполняет диск архивным WAL.
+pgBackRest поддерживает полные/инкрементальные копии, WAL и восстановление на момент времени [[34]](#source34). Для каждой из четырёх HA-групп используется отдельная stanza. Физическая копия и PITR Core включают все семь целевых БД, которые также переключаются совместно при failover. Копирование по возможности читает здоровый standby с ограничением скорости.
 
 Ёмкость отдельного backup-контура считается без обещанного сжатия: три полных копии PG `3 × 37,655 ≈ 112,966 Тбайт`; до 21 суток WAL по 0,3 Тбайт/сутки и изменений по 0,1 Тбайт/сутки — ещё 8,4 Тбайт; 5 Тбайт на текущие файлы, изменения, snapshots поиска и журналов. С 25% резервом получается около **157,957 Тбайт**, выделяется **160 Тбайт**. 21 сутки нужны для цепочки от старейшего weekly full, хотя гарантированное окно PITR — 14 суток. Суточные 0,3/0,1 Тбайт — бюджеты, а не измеренная генерация WAL; превышение запускает пересчёт квоты.
 
-Дополнительная копия последнего weekly full и файлов в другом регионе/контуре требует ещё около 43 Тбайт и **не входит** в эти 160 Тбайт. Полная копия 37,655 Тбайт при эффективном 1 Гбайт/с передаётся около 10,5 часа, поэтому backup-канал и окно обслуживания планируются отдельно. Для RTO восстановления всех PG-групп до 8 часов нужны параллельное восстановление и проверенная суммарная скорость не менее 2 Гбайт/с; самый крупный Core — около 8 Тбайт — должен восстанавливаться не медленнее 400 Мбайт/с плюс replay WAL. Заявленный RTO без такой проверки не считается достигнутым.
+Дополнительная копия последнего weekly full и файлов в другом регионе/контуре требует ещё около 43 Тбайт и **не входит** в эти 160 Тбайт. Полная копия 37,655 Тбайт при эффективном 1 Гбайт/с передаётся около 10,5 часа, поэтому backup-канал и окно обслуживания планируются отдельно. Для RTO восстановления всех четырёх PG-групп до 8 часов нужны параллельное восстановление и проверенная суммарная скорость не менее 2 Гбайт/с. Самая крупная группа теперь PG-Applications — около 16,186 Тбайт: при 800 Мбайт/с копирование занимает около 5,6 часа, после чего нужны replay WAL и проверка. Заявленный RTO без такой проверки не считается достигнутым.
 
 Еженедельно восстанавливается одна PG-группа на изолированный стенд, ежемесячно — весь набор с проверкой API и связей. Для восстановления всех групп выбирается согласованная временная граница, затем сверяются `operation_id`, глобальные ключи и локальные квитанции: один timestamp PITR сам по себе не даёт распределённую транзакцию. Незавершённые операции доводятся/отклоняются по сохранённым квитанциям до открытия записи. Проверяются ссылки на S3 и доступность файлов; поиск перестраивается при необходимости. Возврат потерянного узла выполняется после fencing, восстановления/rewind и догоняющей репликации, без немедленного перевода трафика на холодную копию.
 
 ### 6.10. Границы надёжности
 
-Проект выдерживает потерю одного ДЦ при наличии исправных каналов между двумя оставшимися: есть копии каждого бизнес-шарда, кворумы и резерв API. Подтверждение критической бизнес-записи PostgreSQL требует минимум двух площадок. Для Redis сессий отдельно допускается потеря асинхронного хвоста и повторный вход; эти гарантии не смешиваются с RPO 0 бизнес-данных. Отказ двух ДЦ, потеря кворума или сетевой раздел без безопасного лидера могут остановить запись; ошибочное подтверждение успеха не допускается.
+Проект выдерживает потерю одного ДЦ при наличии исправных каналов между двумя оставшимися: есть копии каждой бизнес-группы, кворумы и резерв API. Подтверждение критической бизнес-записи PostgreSQL требует минимум двух площадок. Для Redis сессий отдельно допускается потеря асинхронного хвоста и повторный вход; эти гарантии не смешиваются с RPO 0 бизнес-данных. Отказ двух ДЦ, потеря кворума или сетевой раздел без безопасного лидера могут остановить запись; ошибочное подтверждение успеха не допускается.
 
 Синхронные PostgreSQL, Kafka, Ceph, кворумы Elasticsearch/ClickHouse, обращения к общему Redis сессий и его репликация используют меж-ДЦ сеть. Канал 2,37 Гбит/с из раздела 4 — пользовательский API, он не включает эти потоки. Для хостов хранилищ принят 25 GbE и два независимых пути; меж-ДЦ каналы рассчитываются по измеренному WAL, репликации и скорости восстановления. Наличие порта 25 GbE само по себе не подтверждает такую пропускную способность WAN. Восстановление копий ограничивается по скорости, чтобы не вытеснять рабочую нагрузку.
 
-Проверки в репозитории подтверждают полноту привязки всех 21 логического набора к СУБД, индексы, карту шардов, количество копий, размеры, fan-out, лимиты подключений и арифметику backup. Окончательная достаточность оборудования, задержки WAN и выполнение RPO/RTO подтверждаются испытаниями из подраздела 6.7.
+Проверки в репозитории подтверждают привязку 21 логического набора к хранилищам, размещение 10 целевых БД в четырёх HA-группах, границы FK, подбор ёмкости по правилу 70%, локальные квитанции команд, общие бюджеты подключений и backup. CPU, IOPS, задержки WAN и выполнение RPO/RTO подтверждаются испытаниями из 6.7.
 
 ## 7. Алгоритмы
 
-В разделе описаны три уже выбранных механизма, от которых зависят согласованность записи, доставка изменений и межшардовые обращения. Они используют стандартные возможности PostgreSQL, Kafka и Elasticsearch. Обычные CRUD-операции, cookie-сессии и встроенные протоколы репликации отдельно не разворачиваются в новые алгоритмы: их реализация и ограничения приведены в разделах 5–6.
+В разделе описаны идемпотентное выполнение команд и доставка изменений в поиск. Регистрация создаёт аккаунт локальной транзакцией `auth_db` и использует общий механизм идемпотентности. Стандартные CRUD-операции, курсорная пагинация и cookie-сессии описаны в разделах 5–6.
 
-### 7.1. Идемпотентное выполнение записи между группами PostgreSQL
+### 7.1. Идемпотентное выполнение записи между целевыми БД PostgreSQL
 
-**Блок системы:** обработчики создания/изменения резюме, вакансий, откликов и статусов; PG-Core и целевая группа PostgreSQL. Отправка отклика используется как основной пример.
+**Блок системы.** Создание аккаунтов, создание и изменение резюме, вакансий, откликов и статусов. Координатор использует `idempotency_db`, сервис команды — собственную целевую БД. Основной пример — отправка отклика.
 
-**Задача:** повтор после таймаута или падения backend не должен повторно применить одну пользовательскую команду. Нужно восстановить исход даже при сбое между commit бизнес-данных в одной группе и отметкой результата в Core. При этом один новый ключ не заменяет ограничение уникальности активной пары резюме–вакансия.
+**Задача:** повтор после таймаута или падения backend не должен повторно применить одну пользовательскую команду. Нужно восстановить исход даже при сбое между commit бизнес-данных в целевой БД и отметкой результата в `idempotency_db`. При этом один новый ключ не заменяет ограничение уникальности активной пары резюме–вакансия.
 
 **Входные данные и ограничения:** проверенный пользователь, маршрут API с идентификатором ресурса, `Idempotency-Key`, тело команды; для отклика — ID резюме и вакансии, необязательное письмо до 10 000 байт UTF-8. Область ключа — `(actor_key,route,client_key)`. Хеш SHA-256 вычисляется по однозначно сериализованным полям команды и маршруту; содержимое письма входит в хеш, cookie и CSRF-токен — нет. Порядок полей JSON не меняет хеш, изменение текста письма меняет его.
 
@@ -1598,16 +1636,16 @@ pgBackRest поддерживает полные/инкрементальные 
 
 **Последовательность работы:**
 
-1. Middleware проверяет сессию, CSRF и права. Неверный формат команды отклоняется до резервирования. При каждом повторе авторизация проверяется снова.
-2. В короткой транзакции Core резервируется ключ с `request_hash`, неизменяемыми `operation_id`, группой/бакетом и `lease_until`. Для существующего ключа другой хеш даёт 409; завершённый ключ возвращает сохранённые код и ID результата. Действующая чужая lease даёт ответ «обрабатывается», без второго исполнения.
+1. Для защищённых маршрутов middleware проверяет сессию, CSRF и права. Публичная регистрация проверяет формат email и пароля, для области ключа используется хеш email из 5.3. Неверный формат команды отклоняется до резервирования, права защищённых операций проверяются при каждом повторе.
+2. В короткой транзакции `idempotency_db` резервируется ключ с `request_hash`, неизменяемыми `operation_id`, целевой БД и `lease_until`. Для существующего ключа другой хеш даёт 409; завершённый ключ возвращает сохранённые код и ID результата. Действующая чужая lease даёт ответ «обрабатывается», без второго исполнения.
 3. После истечения lease новый исполнитель получает тот же `operation_id` и тот же маршрут к данным. При восстановлении pending-операции он сначала ищет локальную квитанцию и, если она уже есть, восстанавливает результат без повторной проверки доступности вакансии. Иначе проверяет источник: для отклика — владельца и публикацию резюме, доступность вакансии, время и версии проверки. Бизнес-отказ этой проверки пока является планом; его нельзя вернуть вместо уже зафиксированного исхода той же операции. Закрытие вакансии после успешной проверки не отменяет принимаемый отклик — это контракт раздела 6.5, без общей транзакции между тремя группами.
-4. В целевой группе начинается транзакция READ COMMITTED. После необходимых локальных чтений заранее выбираются код и ID плана: успеха либо окончательного бизнес-отказа. **До первого бизнес-изменения** вставляется полная строка `operation_receipts` через `INSERT ... ON CONFLICT DO NOTHING` [[41]](#source41). При конфликте исполнитель отдельным чтением получает уже сохранённую квитанцию, сверяет хеш и возвращает её результат. Например, повтор успешного отклика получает исходный 201, а не ошибку из-за уже существующей активной пары.
+4. В целевой БД начинается транзакция READ COMMITTED. После необходимых локальных чтений заранее выбираются код и ID плана: успеха либо окончательного бизнес-отказа. **До первого бизнес-изменения** вставляется полная строка `operation_receipts` через `INSERT ... ON CONFLICT DO NOTHING` [[41]](#source41). При конфликте исполнитель отдельным чтением получает уже сохранённую квитанцию, сверяет хеш и возвращает её результат. Например, повтор успешного отклика получает исходный 201, а не ошибку из-за уже существующей активной пары.
 5. Если квитанция новая и план допускает действие, в той же транзакции выполняется бизнес-запись: отклик, письмо и версии проверки либо условное обновление статуса. Частичный UNIQUE активной пары и `UPDATE ... WHERE version=expected` разрешают конкуренцию разных команд. Если план является окончательным отказом, фиксируется только квитанция отказа. При ошибке выполнения бизнес-записи вся транзакция, включая предварительную квитанцию, откатывается. Окончательный бизнес-отказ может быть сохранён квитанцией с соответствующим кодом без бизнес-изменения; временный сетевой сбой окончательным исходом не считается.
-6. Commit делает видимыми бизнес-изменение и квитанцию одновременно. Затем Core получает `completed` либо `failed`, код и ID результата. Большое тело резюме/письма в Core не копируется. Если API повторно возвращает сам объект, доступ к нему проверяется, а читается его текущее состояние; побайтово одинаковое тело ответа не обещается.
-7. Если процесс упал после commit целевой БД, но до завершения ключа в Core, повтор обнаруживает квитанцию и завершает ключ без новой записи. Неизвестный исход при недоступности БД остаётся `pending`; клиенту не сообщается ложный успех или доказанный rollback.
-8. После 24 часов pending-операцию разрешено только восстанавливать/завершать по её исходу, а не заново исполнять бизнес-команду. Квитанции очищаются после 48 часов, только если Core подтвердил окончательный исход и сроки возможных попыток истекли. При недоступности Core очистка откладывается. После окончания договорённого окна новый ключ является новой командой и проходит обычные бизнес-ограничения.
+6. Commit делает видимыми бизнес-изменение и квитанцию одновременно. Затем координатор в `idempotency_db` сохраняет `completed` либо `failed`, код и ID результата. Большое тело резюме/письма в `idempotency_db` не копируется. Если API повторно возвращает сам объект, доступ к нему проверяется, а читается его текущее состояние; побайтово одинаковое тело ответа не обещается.
+7. Если процесс упал после commit целевой БД, но до завершения ключа в `idempotency_db`, повтор обнаруживает квитанцию и завершает ключ без новой записи. Неизвестный исход при недоступности БД остаётся `pending`; клиенту не сообщается ложный успех или доказанный rollback.
+8. После 24 часов pending-операцию разрешено только восстанавливать/завершать по её исходу, а не заново исполнять бизнес-команду. Квитанции очищаются после 48 часов, только если координатор подтвердил окончательный исход и сроки возможных попыток истекли. При недоступности координатора очистка откладывается. После окончания договорённого окна новый ключ является новой командой и проходит обычные бизнес-ограничения.
 
-Для локальных регистрационных записей достаточно одной транзакции Core с ключом. Отдельная квитанция другой группы не требуется. Сетевые обращения к другим сервисам и S3 внутри открытой бизнес-транзакции не выполняются.
+Сетевые обращения к сервисам и S3 выполняются между локальными SQL-транзакциями. Координатор команд использует свою роль `idempotency_db`, сервис-получатель пишет только в собственную БД.
 
 **Структуры данных:** `idempotency_keys` с PK области ключа, уникальным `operation_id` и состояниями `pending/completed/failed`; `operation_receipts` с PK `operation_id`, хешем, кодом и ID результата; бизнес-строки с версией; частичный UNIQUE активного отклика. Квитанция сразу содержит предполагаемый исход, но вне транзакции не видна до commit; незавершённые заготовки не фиксируются отдельным commit.
 
@@ -1617,12 +1655,12 @@ pgBackRest поддерживает полные/инкрементальные 
 |---|---|
 | Только проверка «есть ли уже отклик» | Не покрывает повтор изменения статуса и сбой после commit; проверка перед INSERT также подвержена гонке |
 | Ключи только в Redis | Асинхронный failover/TTL может потерять сведения о выполненной команде; гарантии бизнес-записи не сохраняются |
-| Распределённая транзакция Core и целевой группы | Потребовала бы отдельного координатора и восстановления незавершённых транзакций двух БД |
-| Выбранный ключ Core + локальная квитанция | Бизнес-изменение атомарно в одной группе, глобальный результат восстанавливается по квитанции |
+| Распределённая транзакция `idempotency_db` и целевой БД | Потребовала бы отдельного координатора и восстановления незавершённых транзакций двух БД |
+| Выбранный ключ `idempotency_db` + локальная квитанция | Бизнес-изменение атомарно в одной целевой БД, глобальный результат восстанавливается по квитанции |
 
-**Обоснование выбора и параметров:** все бизнес-данные одной команды размещены в одной целевой группе, поэтому распределённый commit не нужен. 48 часов квитанций превышают 24-часовое окно ключа; 30-секундная lease превышает 5-секундный предел транзакции и не используется как единственная защита. UUID операции и целевая группа не меняются после сбоя. Гарантия относится к бизнес-эффекту одной команды в её окне, а не к единственному сетевому вызову.
+**Обоснование выбора и параметров.** Каждая команда фиксирует бизнес-изменение и квитанцию в одной целевой БД. При регистрации это запись аккаунта в `auth_db`. Удержание квитанций 48 часов превышает окно ключа 24 часа, lease 30 секунд превышает предел SQL-транзакции 5 секунд. UUID операции и маршрут БД сохраняются при повторе.
 
-**Влияние на данные и нагрузку:** сохраняются 69 изменяющих команд/с, 207 логических изменений ключей/с и 67 межгрупповых операций/с из разделов 5.3 и 6.5. Полная квитанция записывается один раз в успешном штатном цикле; вместе с очисткой это `67 × 2 = 134` изменения/с и 2,964 Гбайт на 48 часов. Дополнительного UPDATE квитанции для каждого успеха нет. Повторы, ожидание уникального ключа и переоформление lease проверяются сверх штатного потока в пределах резервов раздела 6.7. Полное письмо хранится один раз; в ключах — только хеш.
+**Влияние на данные и нагрузку.** Общий поток составляет 69 изменяющих команд/с, включая создание аккаунтов. Ключи в `idempotency_db` дают 207 изменений/с. Квитанции команд вместе с очисткой дают `69 × 2 = 138` изменений/с и 3,052 Гбайт на 48 часов из 6.5. Повторы и проверка завершения перед очисткой включаются в испытательный резерв. Полное письмо хранится в отклике, ключ содержит хеш команды.
 
 ### 7.2. Доставка изменений в поиск: transactional outbox и контроль версий
 
@@ -1650,7 +1688,7 @@ pgBackRest поддерживает полные/инкрементальные 
 1. Транзакция Catalogue меняет вакансию, увеличивает её версию и добавляет outbox. Если транзакция откатилась, событие не публикуется. Это уже выбранный transactional outbox [[18]](#source18).
 2. Отправитель короткой транзакцией выбирает готовые строки с `processed_at IS NULL` и `next_attempt_at <= now()`, используя `FOR UPDATE SKIP LOCKED` [[42]](#source42). В том же захвате увеличивается `retry_count`, а `next_attempt_at` переносится на 30 секунд. Commit освобождает SQL-блокировки **до** обращения к Kafka.
 3. Событие публикуется с ключом `vacancy_id` и `acks=all`. После подтверждения отправитель ставит `delivered_at` и время следующей проверки через 5 минут. UPDATE применяется только к своему номеру попытки и ещё необработанному событию. Запоздалый воркер не перезаписывает состояние новой попытки. При падении до отметки публикация повторится после lease.
-4. Индексатор читает Kafka, проверяет квитанцию `(consumer_id,event_id)` и получает актуальную вакансию из primary Catalogue. Документ строится из этой прочитанной версии источника; номер версии берётся из неё же, а не безусловно из старого события. Уже обработанный event ID пропускается.
+4. Индексатор читает Kafka, проверяет квитанцию `(consumer_id,event_id)` и получает актуальную вакансию из primary `vacancies_db`. Краткую компанию возвращает API сервиса компаний. Документ и его версия строятся из текущей исходной вакансии. Уже обработанный event ID пропускается.
 5. Документы отправляются Bulk API с `_id=vacancy_id` и `version_type=external_gte` [[36]](#source36), [[44]](#source44). Одинаковая версия безопасно повторяется, более старая не заменяет новую. Ответ проверяется **по каждому элементу**: общий HTTP 200 пакета ещё не означает успех всех документов.
 6. Для успешно записанных документов или подтверждённого конфликта с уже более новой внешней версией одной SQL-транзакцией сохраняются квитанции и `processed_at`. Временная ошибка возвращается в ограниченный повтор; ошибка схемы/данных поднимает сигнал и оставляет событие необработанным, без молчаливого удаления.
 7. После SQL commit вручную фиксируется следующий Kafka offset после непрерывной последовательности успешно обработанных записей каждой партиции [[45]](#source45). Перепрыгивать через ошибочную запись нельзя. В одной партиции обработка последовательная; разные партиции могут обрабатываться параллельно. При rebalance завершённые позиции сохраняются, а повтор незавершённых записей безопасен.
@@ -1676,52 +1714,6 @@ pgBackRest поддерживает полные/инкрементальные 
 За 10 минут накапливается до `5 × 600 = 3 000` исходных событий. При продолжающемся входном потоке чистая скорость освобождения — `50 − 5 = 45` событий/с; расчётное время разбора такого отставания — `ceil(3 000 / 45) = 67 секунд`. Эта оценка предполагает распределение работы между двумя индексаторами. При одном доступном индексаторе или горячей партиции, ограниченной одним процессом, используется `ceil(3 000 / (25 − 5)) = 150 секунд`. После отказа одного ДЦ оставшаяся пара отправителя/индексатора сохраняет 25 событий/с, что выше входных 5/с. Это оценки обработки очереди без дополнительного времени переключения, повторов и refresh, а не обещание полного RTO 67 секунд.
 
 **Влияние на данные и нагрузку:** новых сущностей не появилось. В штатном цикле outbox теперь имеет пять логических изменений на событие: создание, захват, отметка доставки, отметка обработки и очистка. Поэтому раздел 5.3 обновлён до **25 QPS записи вместо 20**; 5 QPS чтения, 432 тыс. строк и объём 0,442 Гбайт сохраняются. Пакетная SQL-команда меняет несколько строк; логические изменения строк не равны числу сетевых SQL-вызовов. Цель Catalogue 500 изменений/с проверена с обработкой 50 событий/с в разделе 6.7. Объём полезных событий в штатном потоке — до 5 Кбайт/с до копий и протокольных расходов; в Kafka не передаются полные 50-Кбайтные вакансии. Пустые опросы двух отправителей дают до двух служебных SQL-вызовов/с; они включаются в тестовый поток Catalogue отдельно от логических изменений строк. У отправителя буфер полезных событий — до 25 Кбайт, у индексатора Bulk-payload — до `100 × 40 = 4 000 Кбайт` до накладных расходов; независимая новая постоянная очередь не создаётся. Суммарные 7 028 API RPS не меняются.
-
-### 7.3. Постраничное объединение откликов работодателя из шардов
-
-**Блок системы:** API входящих откликов работодателя и четыре группы PG-Applications.
-
-**Задача:** вернуть общую страницу откликов компании, хотя данные распределены по соискателям. Чтение конкретного отклика уже маршрутизируется по ID, но для списка неизвестен один шард.
-
-**Входные данные и ограничения:** актуальное членство пользователя в компании, `company_id`, необязательный фильтр вакансии, курсор предыдущей страницы. Размер страницы `P=20`, число физических групп `S=4`. Порядок — `accepted_at DESC, application_id DESC`; оба поля NOT NULL и неизменяемы. Время назначается сервером, UUID сравниваются в том же порядке, что и в PostgreSQL.
-
-Результат содержит краткие данные без полного письма и резюме. Курсор включает компанию, фильтр вакансии, последний выданный ключ, версию формата и HMAC-подпись. Он не предоставляет права доступа: членство проверяется на каждом запросе.
-
-**Последовательность работы:**
-
-1. Проверить сессию и членство в Core. Проверить подпись курсора и совпадение компании/фильтра с запросом; курсор другой выборки не принимается.
-2. Параллельно выполнить **по одному SQL-запросу в каждую из четырёх групп** с одинаковым фильтром и порядком. На следующей странице добавить сравнение кортежей [[46]](#source46):
-
-   ```sql
-   SELECT application_id, applicant_user_id, resume_id, vacancy_id,
-          status, summary, accepted_at
-   FROM applications
-   WHERE company_id = $1
-     AND (accepted_at, application_id) < ($2, $3)
-   ORDER BY accepted_at DESC, application_id DESC
-   LIMIT 20;
-   ```
-
-   Для первой страницы условие курсора опускается; фильтр вакансии при наличии добавляется отдельным параметром. PostgreSQL сам объединяет восемь локальных бакетов группы. Приложение не делает 32 отдельных обращения.
-3. Получить до 20 кратких строк из каждой группы — максимум 80. Достаточность этого предела следует из порядка: строка ниже двадцатой в своём шарде уже имеет перед собой 20 строк того же шарда и не может входить в общую первую двадцатку.
-4. Выполнить k-way merge: положить первую строку каждой непустой страницы в max-heap по общему ключу; извлекать наибольшую и добавлять следующую строку из той же страницы, пока не выбраны 20 строк или heap не опустел.
-5. Вернуть страницу; следующим курсором сделать ключ последней выданной строки. Все шарды следующей страницы получают один и тот же глобальный курсор. Если выдано ровно 20 строк, следующая страница может оказаться пустой — дополнительный запрос COUNT или чтение 21-й строки для точного `has_more` не выполняются.
-6. При недоступности любой группы вернуть ошибку/ограниченный повтор в рамках общего deadline. Три успешные страницы не выдаются за полный список четырёх. После failover группы курсор по ключу продолжает работать, поскольку ID и время не зависят от адреса primary.
-
-**Структуры данных:** индексы `(company_id,accepted_at DESC,application_id DESC)` и `(vacancy_id,accepted_at DESC,application_id DESC)` из раздела 6.3, четыре отсортированные страницы, heap до четырёх элементов и подписанный курсор. Полные письма не участвуют в сортировке. Слияние занимает `O(S + P log S)` операций после получения страниц, буфер — `O(S × P)` кратких строк.
-
-**Альтернативы:**
-
-| Вариант | Отличие |
-|---|---|
-| OFFSET на каждом шарде | Чем глубже страница, тем больше строк нужно пропустить; новые вставки дополнительно сдвигают страницы [[43]](#source43) |
-| Одна группа всех откликов | Нет fan-out, но около 12,448 Тбайт логических данных с письмами не помещаются в выбранный дисковый бюджет одной группы |
-| Отдельная проекция откликов по компании | Потребовала бы ещё около 1,132 Тбайт при краткой записи 1 Кбайт, индексы и синхронизацию примерно 56 изменений/с |
-| Выбранный курсор + merge четырёх страниц | Работает с исходными данными, не создаёт вторую копию писем или отдельную асинхронную проекцию |
-
-**Обоснование выбора и параметров:** при 95 запросах работодателей/с ограниченный fan-out из четырёх групп укладывается в выбранные ресурсы. 20 строк соответствуют размеру страницы, уже принятому в расчётах API. Курсор заменяет проход по глубокой истории, уникальный ID разрешает совпадение времени. Общий snapshot четырёх БД не создаётся: это актуальный список, а не выгрузка на фиксированный момент. При конкурентных вставках/изменениях содержимое между страницами может меняться; для неизменного набора строгий порядок и условие «меньше последнего ключа» исключают повтор строки между страницами.
-
-**Влияние на данные и нагрузку:** выбранные индексы уже есть в разделе 6.3, новой таблицы нет. Работодатель создаёт `95 × 4 = 380` SQL-запросов/с вместо 95 при одной группе; добавка **285 QPS** включена в общие **820 SQL-чтений откликов/с**. На запрос передаётся до `4 × 20 × 2 = 160 Кбайт` кратких строк, до **15,2 Мбайт/с ≈ 0,122 Гбит/с** по системе. Этот внутренний поток добавлен в раздел 6.4; внешняя страница остаётся 40 Кбайт. Курсор вычисляется в backend, отдельное хранилище курсоров не требуется.
 
 ## Список источников
 
@@ -1837,7 +1829,7 @@ pgBackRest поддерживает полные/инкрементальные 
 37. [OWASP — CSRF и Synchronizer Token Pattern](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
 
 <a id="source38"></a>
-38. [Redis — Cluster specification: hash slots, реплики и failover](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/)
+38. [Redis — Sentinel, мониторинг primary и автоматическое переключение](https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/)
 
 <a id="source39"></a>
 39. [Redis — GETEX: чтение значения с изменением срока действия](https://redis.io/docs/latest/commands/getex/)
@@ -1865,3 +1857,12 @@ pgBackRest поддерживает полные/инкрементальные 
 
 <a id="source47"></a>
 47. [PostgreSQL — transaction_timeout и ограничения выполнения запросов](https://www.postgresql.org/docs/current/runtime-config-client.html)
+
+<a id="source48"></a>
+48. [PostgreSQL — иерархия cluster, database, schema и границы доступа между БД](https://www.postgresql.org/docs/current/manage-ag-overview.html)
+
+<a id="source49"></a>
+49. [Elasticsearch — отказоустойчивость небольших кластеров и выбор управляющего узла](https://www.elastic.co/docs/deploy-manage/production-guidance/availability-and-resilience/resilience-in-small-clusters)
+
+<a id="source50"></a>
+50. [Elasticsearch — основная копия, реплики и обработка чтений и записей](https://www.elastic.co/docs/deploy-manage/distributed-architecture/reading-and-writing-documents)
