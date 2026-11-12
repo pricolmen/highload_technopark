@@ -1345,7 +1345,7 @@ erDiagram
 | `file_objects` | Ceph RGW, S3-бакеты `static` и `images` | Неизменяемые ключи `purpose/file_id/version/variant`; checksum | CRUSH по ключу, 3 копии в разных ДЦ, `size=3, min_size=2` |
 | `cdn_cache` | CDN провайдера, копии объектов | Ключ URL с версией; TTL до суток | Распределение по edge-узлам провайдера; origin — S3, источник истины вне CDN |
 | `request_log_buffer` | Kafka, топик `api-logs` | Ключ `request_id`, координата `(partition,offset)` | 12 партиций, RF=3, min ISR=2; хранение 15 минут |
-| `request_logs` | ClickHouse, ReplicatedMergeTree | `PARTITION BY toDate(timestamp)`; `ORDER BY (route,timestamp,event_id)`; TTL 7 суток | 1 shard × 3 replicas, по реплике на ДЦ; 3 ClickHouse Keeper |
+| `request_logs` | ClickHouse, ReplicatedMergeTree | `PARTITION BY toDate(timestamp)`; `ORDER BY (route,timestamp,event_id)`; TTL 7 суток | Три полные реплики журналов, по одной на ДЦ. Координация через три ClickHouse Keeper. |
 | `operation_receipts` — физическая служебная таблица | PostgreSQL в `auth_db`, `resumes_db`, `vacancies_db`, `applications_db` | PK `operation_id`, индекс `expires_at`, хеш запроса и результат | Локальная транзакция с бизнес-записью, HA своей группы |
 
 Для откликов дополнительно создаются индексы:
